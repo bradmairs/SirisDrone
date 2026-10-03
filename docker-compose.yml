@@ -1,0 +1,21 @@
+# Run on the NAS itself (Synology Container Manager, QNAP Container Station, Unraid, TrueNAS…)
+# or on any PC that has the NAS share mounted.  Edit the left-hand side of each volume.
+services:
+  sirisdrone:
+    build: .
+    container_name: sirisdrone-studio
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Where finished photos/videos are written (paths inside the container).
+      SIRIS_OUTPUT_ROOTS: "NAS=/nas/exports"
+      # Optional: folders whose footage you can import without uploading.
+      SIRIS_INPUT_ROOTS: "Drone footage=/nas/footage"
+      # Optional: password-protect the web UI.
+      # SIRIS_USER: admin
+      # SIRIS_PASSWORD: change-me
+    volumes:
+      - ./data:/data                                 # library, edits, LUTs, settings
+      - /volume1/Drone/Exports:/nas/exports          # <- your NAS export folder
+      - /volume1/Drone/Footage:/nas/footage:ro       # <- your raw drone footage (read-only)

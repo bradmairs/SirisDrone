@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SirisDrone Studio</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='8' cy='8' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><circle cx='24' cy='8' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><circle cx='8' cy='24' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><circle cx='24' cy='24' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><rect x='12' y='12' width='8' height='8' rx='2' fill='%2338bdf8'/></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="8" cy="8" r="5"/><circle cx="24" cy="8" r="5"/><circle cx="8" cy="24" r="5"/><circle cx="24" cy="24" r="5"/></g><rect x="12" y="12" width="8" height="8" rx="2" fill="currentColor"/></svg>
+    <span>SirisDrone <b>Studio</b></span>
+  </div>
+  <div class="topbar-actions">
+    <label class="btn" title="Upload photos and videos">
+      <input type="file" id="fileInput" multiple accept="image/*,video/*,.dng,.DNG,.mov,.MOV,.mp4,.MP4" hidden>
+      Upload
+    </label>
+    <button class="btn" id="importBtn" title="Add files already on the NAS (no upload needed)">Import from NAS</button>
+    <button class="btn ghost" id="jobsBtn">Exports <span class="pill" id="jobsCount" hidden>0</span></button>
+    <button class="btn primary" id="exportBtn" disabled>Export…</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- Library -->
+  <aside class="library" id="library">
+    <div class="lib-head">
+      <div class="seg" id="libFilter">
+        <button data-f="all" class="on">All</button><button data-f="photo">Photos</button><button data-f="video">Videos</button>
+      </div>
+      <button class="link" id="selectAllBtn">Select all</button>
+    </div>
+    <div class="upload-progress" id="uploadProgress" hidden><div class="bar"><i></i></div><span></span></div>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="lib-empty" id="libEmpty">
+      <p><b>Drop drone photos &amp; videos here</b></p>
+      <p>JPEG, DNG, PNG, TIFF, MP4, MOV</p>
+    </div>
+    <div class="lib-foot" id="libFoot" hidden>
+      <span id="selCount">0 selected</span>
+      <button class="link" id="syncBtn">Apply settings…</button>
+      <button class="link danger" id="removeBtn">Remove</button>
+    </div>
+  </aside>
+
+  <!-- Viewer -->
+  <section class="viewer">
+    <div class="stage" id="stage">
+      <div class="stage-inner" id="stageInner">
+        <img id="previewImg" alt="" draggable="false">
+        <div class="crop-layer" id="cropLayer" hidden>
+          <div class="crop-shade"></div>
+          <div class="crop-box" id="cropBox">
+            <div class="grid"></div>
+            <i data-h="nw"></i><i data-h="n"></i><i data-h="ne"></i><i data-h="e"></i>
+            <i data-h="se"></i><i data-h="s"></i><i data-h="sw"></i><i data-h="w"></i>
+          </div>
+        </div>
+      </div>
+      <div class="stage-msg" id="stageMsg">Upload or import some drone media to get started.</div>
+      <div class="spinner" id="spinner" hidden></div>
+      <div class="badge-before" id="beforeBadge" hidden>Original</div>
+    </div>
+    <div class="viewer-bar">
+      <div class="vb-left">
+        <button class="btn sm" id="beforeBtn" title="Hold to see the original (shortcut: hold B)">Before / After</button>
+        <button class="btn sm" id="cropToggle" title="Crop &amp; straighten (C)">Crop</button>
+      </div>
+      <div class="vb-info" id="infoLine"></div>
+      <div class="vb-right">
+        <button class="btn sm" id="prevBtn" title="Previous (←)">‹</button>
+        <button class="btn sm" id="nextBtn" title="Next (→)">›</button>
+      </div>
+    </div>
+    <div class="timeline" id="timeline" hidden>
+      <div class="tl-track" id="tlTrack">
+        <div class="tl-trim" id="tlTrim"></div>
+        <div class="tl-head" id="tlHead"></div>
+      </div>
+      <div class="tl-controls">
+        <span class="tc" id="tlTime">0:00.0</span>
+        <button class="btn sm" id="setInBtn" title="Set trim start at playhead (I)">Set in</button>
+        <button class="btn sm" id="setOutBtn" title="Set trim end at playhead (O)">Set out</button>
+        <button class="btn sm" id="clearTrimBtn">Clear trim</button>
+        <span class="tl-range" id="tlRange"></span>
+        <button class="btn sm" id="grabBtn" title="Export this frame as a full-resolution photo">Save frame as photo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Controls -->
+  <aside class="panel" id="panel">
+    <canvas id="histogram" width="300" height="80" title="Histogram"></canvas>
+    <div class="sections" id="sections"></div>
+    <div class="panel-foot">
+      <button class="btn sm" id="copyBtn" title="Copy this item's settings">Copy</button>
+      <button class="btn sm" id="pasteBtn" title="Paste settings onto this item" disabled>Paste</button>
+      <button class="btn sm" id="resetBtn">Reset</button>
+      <button class="btn sm" id="defaultBtn" title="New uploads start with these settings">Set as default</button>
+    </div>
+  </aside>
+</main>
+
+<div class="drop-overlay" id="dropOverlay" hidden><div>Drop to upload</div></div>
+
+<!-- Export dialog -->
+<dialog id="exportDlg" class="dlg">
+  <form method="dialog" id="exportForm">
+    <h2>Export to NAS</h2>
+    <div class="field">
+      <label>What</label>
+      <div class="seg" id="exportScope">
+        <button type="button" data-s="current" class="on">This item</button>
+        <button type="button" data-s="selected">Selected (<span id="exSelN">0</span>)</button>
+        <button type="button" data-s="all">All (<span id="exAllN">0</span>)</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Destination</label>
+      <div class="row">
+        <select id="exRoot"></select>
+        <input id="exFolder" placeholder="sub-folder, e.g. 2026/Beach shoot">
+        <button type="button" class="btn sm" id="exBrowse">Browse…</button>
+      </div>
+      <div class="hint" id="exDestHint"></div>
+    </div>
+    <div class="cols">
+      <fieldset>
+        <legend>Photos</legend>
+        <div class="field"><label>Format</label>
+          <select id="exPhotoFmt"><option value="jpeg">JPEG</option><option value="tiff16">TIFF 16-bit</option><option value="png">PNG</option></select></div>
+        <div class="field" id="exQualRow"><label>JPEG quality <output id="exQualOut"></output></label>
+          <input type="range" id="exQuality" min="70" max="100" step="1"></div>
+        <div class="field"><label>Size</label>
+          <select id="exPhotoSize"><option value="original">Full resolution</option><option value="7680">7680 px long edge</option><option value="5120">5120 px</option><option value="3840">3840 px (4K)</option><option value="2048">2048 px (web)</option><option value="1080">1080 px (social)</option></select></div>
+      </fieldset>
+      <fieldset>
+        <legend>Videos</legend>
+        <div class="field"><label>Codec</label><select id="exCodec"></select></div>
+        <div class="field"><label>Quality</label>
+          <select id="exVQual"><option value="max">Maximum</option><option value="high">High</option><option value="standard">Standard (smaller)</option></select></div>
+        <div class="field"><label>Resolution</label>
+          <select id="exVSize"><option value="original">Same as crop</option><option value="3840">4K UHD (3840)</option><option value="2560">2.7K (2560)</option><option value="1920">1080p (1920)</option><option value="1280">720p (1280)</option></select></div>
+        <div class="field"><label>Frame rate</label>
+          <select id="exFps"><option value="source">Same as source</option><option value="24">24</option><option value="25">25</option><option value="30">30</option><option value="50">50</option><option value="60">60</option></select></div>
+      </fieldset>
+    </div>
+    <div class="field row wrap">
+      <label class="chk"><input type="checkbox" id="exMeta"> Keep camera metadata</label>
+      <label class="chk"><input type="checkbox" id="exGps"> Remove GPS location</label>
+      <label class="chk"><input type="checkbox" id="exOverwrite"> Overwrite existing files</label>
+      <label class="inline">File suffix <input id="exSuffix" size="8"></label>
+    </div>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button type="button" class="btn primary" id="exStart">Start export</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Folder browser -->
+<dialog id="browseDlg" class="dlg">
+  <form method="dialog">
+    <h2 id="browseTitle">Choose folder</h2>
+    <div class="crumbs" id="browseCrumbs"></div>
+    <ul class="dirlist" id="browseList"></ul>
+    <div class="row" id="browseNewRow">
+      <input id="browseNewName" placeholder="New folder name">
+      <button type="button" class="btn sm" id="browseNew">Create</button>
+    </div>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button type="button" class="btn primary" id="browseOk">Use this folder</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Settings sync -->
+<dialog id="syncDlg" class="dlg small">
+  <form method="dialog">
+    <h2 id="syncTitle">Apply settings</h2>
+    <p class="hint">Copy settings from the item you are viewing to the selected items.</p>
+    <label class="chk"><input type="checkbox" data-part="grade" checked> Colour grade &amp; LUT</label>
+    <label class="chk"><input type="checkbox" data-part="effects" checked> Sharpen &amp; vignette</label>
+    <label class="chk"><input type="checkbox" data-part="stamp" checked> Stamp</label>
+    <label class="chk"><input type="checkbox" data-part="geometry"> Crop, rotate &amp; straighten</label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button type="button" class="btn primary" id="syncOk">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Jobs drawer -->
+<div class="drawer" id="jobsDrawer" hidden>
+  <div class="drawer-head"><h3>Exports</h3>
+    <div><button class="link" id="clearJobs">Clear finished</button><button class="link" id="closeJobs">Close</button></div>
+  </div>
+  <ul class="jobs" id="jobsList"></ul>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
