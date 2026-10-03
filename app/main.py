@@ -103,6 +103,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                             for n, p in cfg.input_roots.items()],
             "presets": grading.PRESETS,
             "default_edit": DEFAULT_EDIT,
+            "neutral_grade": grading.DEFAULT_GRADE,
             "codecs": {k: v[0] for k, v in video.CODECS.items()},
             "photo_formats": list(render.PHOTO_FORMATS),
             "settings": load_settings(),
@@ -189,7 +190,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         mode = body.get("mode", "final")
         t = float(body.get("t", 0) or 0)
         if body.get("original"):
-            edit = normalize_edit({"rotate": edit["rotate"], "flip_h": edit["flip_h"],
+            edit = normalize_edit({"grade": {}, "rotate": edit["rotate"], "flip_h": edit["flip_h"],
                                    "flip_v": edit["flip_v"], "straighten": edit["straighten"],
                                    "crop": edit["crop"], "stamp": {"enabled": False}})
         try:

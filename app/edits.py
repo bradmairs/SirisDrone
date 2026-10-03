@@ -12,7 +12,7 @@ import copy
 import math
 from dataclasses import dataclass
 
-from .grading import DEFAULT_GRADE, normalize_grade
+from .grading import HOUSE_GRADE, normalize_grade
 
 STAMP_POSITIONS = ("br", "bl", "tr", "tl", "bc", "tc")
 
@@ -23,17 +23,18 @@ DEFAULT_EDIT: dict = {
     "straighten": 0.0,
     "aspect": "original",
     "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
-    "grade": dict(DEFAULT_GRADE),
+    "grade": normalize_grade(HOUSE_GRADE),  # "BRM Blue"
     "sharpen": 0,     # 0..100
     "vignette": 0,    # -100..100 (negative darkens edges)
     "stamp": {
         "enabled": True,
         "position": "br",
-        "size": 30,       # stamp width as % of the image's short edge
-        "margin": 3,      # % of the short edge
-        "opacity": 90,
-        "color": "#ffffff",
-        "shadow": 35,     # drop-shadow strength 0..100
+        # Matches BRM Highlife's posts: solid black script, no shadow, tucked into the corner.
+        "size": 24,       # stamp width as % of the image's short edge
+        "margin": 2.7,    # % of the short edge
+        "opacity": 95,
+        "color": "#000000",
+        "shadow": 0,      # drop-shadow strength 0..100
     },
     "video": {
         "trim_start": 0.0,
@@ -68,23 +69,23 @@ def normalize_edit(edit: dict | None) -> dict:
     w = _num(c.get("w", 1), 0.01, 1, 1.0)
     h = _num(c.get("h", 1), 0.01, 1, 1.0)
     e["crop"] = {"x": min(x, 1 - w), "y": min(y, 1 - h), "w": w, "h": h}
-    e["grade"] = normalize_grade(edit.get("grade"))
+    e["grade"] = normalize_grade(edit["grade"]) if "grade" in edit else e["grade"]
     e["sharpen"] = _num(edit.get("sharpen", 0), 0, 100, 0)
     e["vignette"] = _num(edit.get("vignette", 0), -100, 100, 0)
 
     s = {**DEFAULT_EDIT["stamp"], **(edit.get("stamp") or {})}
     pos = s.get("position")
-    color = str(s.get("color") or "#ffffff")
+    color = str(s.get("color") or DEFAULT_EDIT["stamp"]["color"])
     if not (len(color) == 7 and color.startswith("#")):
-        color = "#ffffff"
+        color = DEFAULT_EDIT["stamp"]["color"]
     e["stamp"] = {
         "enabled": bool(s.get("enabled")),
         "position": pos if pos in STAMP_POSITIONS else "br",
-        "size": _num(s.get("size"), 5, 90, 30),
-        "margin": _num(s.get("margin"), 0, 20, 3),
-        "opacity": _num(s.get("opacity"), 0, 100, 90),
+        "size": _num(s.get("size"), 5, 90, 24),
+        "margin": _num(s.get("margin"), 0, 20, 2.7),
+        "opacity": _num(s.get("opacity"), 0, 100, 95),
         "color": color,
-        "shadow": _num(s.get("shadow"), 0, 100, 35),
+        "shadow": _num(s.get("shadow"), 0, 100, 0),
     }
 
     v = {**DEFAULT_EDIT["video"], **(edit.get("video") or {})}

@@ -37,11 +37,20 @@ DEFAULT_GRADE: dict = {
     "shadow_sat": 0,     # 0..100
     "highlight_hue": 35, # degrees
     "highlight_sat": 0,  # 0..100
+    "blue_sat": 0,       # -100..100  saturation of sky/water blues only
+    "blue_lum": 0,       # -100..100  brightness of blues (negative = deeper)
     "lut": None,         # id of an uploaded .cube LUT
     "lut_strength": 100, # 0..100
 }
 
+# The BRM Highlife house look: rich, clear sky & ocean blues with natural greens and sand.
+# New uploads start with this grade (see edits.DEFAULT_EDIT).
+HOUSE_GRADE: dict = {"exposure": 0.05, "temperature": -15, "tint": 6, "contrast": 28,
+                     "highlights": -20, "whites": 5, "blacks": -6, "dehaze": 15,
+                     "vibrance": 40, "saturation": 15, "blue_sat": 40, "blue_lum": 12}
+
 PRESETS: dict[str, dict] = {
+    "BRM Blue": HOUSE_GRADE,
     "Natural": {},
     "Vivid Aerial": {"contrast": 18, "highlights": -35, "shadows": 25, "vibrance": 35,
                      "saturation": 8, "dehaze": 25, "whites": 8, "blacks": -8},
@@ -70,6 +79,7 @@ PRESETS: dict[str, dict] = {
 
 
 def normalize_grade(grade: dict | None) -> dict:
+    """Fill in a grade; missing keys are neutral (0), not the house look."""
     g = dict(DEFAULT_GRADE)
     if grade:
         for k, v in grade.items():
@@ -221,6 +231,15 @@ def _hue_rgb(hue_deg: float) -> np.ndarray:
     return rgb - float(rgb @ LUMA)
 
 
+def _blue_weight(x: np.ndarray) -> np.ndarray:
+    """0..1: how much a pixel belongs to the cyan→blue range (hue ~165°–255°, centred on 210°)."""
+    r, g, b = x[..., 0], x[..., 1], x[..., 2]
+    hue = np.degrees(np.arctan2(np.sqrt(3) * (g - b), 2 * r - g - b)) % 360
+    t = np.clip(1 - np.abs(hue - 210) / 45, 0, 1)
+    chroma = x.max(axis=-1) - x.min(axis=-1)
+    return t * t * (3 - 2 * t) * np.clip(chroma * 5, 0, 1)
+
+
 def grade_pixels(rgb: np.ndarray, g: dict, user_lut: np.ndarray | None = None) -> np.ndarray:
     """Apply the grade directly to float RGB [..., 3] in 0..1."""
     x = np.clip(np.asarray(rgb, np.float32), 0.0, 1.0)
@@ -285,7 +304,18 @@ def grade_pixels(rgb: np.ndarray, g: dict, user_lut: np.ndarray | None = None) -
             amount = np.maximum(amount, 0)[..., None]
         x = y[..., None] + chroma * amount
 
-    # 6. Split toning.
+    # 6. Blues only (sky & water): leaves greens, sand, rock and skin alone.
+    bs, bl = g["blue_sat"] / 100.0, g["blue_lum"] / 100.0
+    if bs or bl:
+        w = _blue_weight(x)[..., None]
+        if bs:
+            y = x @ LUMA
+            x = y[..., None] + (x - y[..., None]) * (1 + bs * w)
+        if bl:
+            x = x * (1 + 0.35 * bl * w)
+        y = x @ LUMA
+
+    # 7. Split toning.
     if g["shadow_sat"] or g["highlight_sat"]:
         yy = np.clip(y, 0, 1)[..., None]
         if g["shadow_sat"]:

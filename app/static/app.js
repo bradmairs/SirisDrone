@@ -192,7 +192,9 @@ function slider(path, label, min = -100, max = 100, step = 1, opts = {}) {
   wrap.innerHTML = `<label title="Double-click to reset">${label}</label><input type="number" step="${step}" min="${min}" max="${max}"><input type="range" min="${min}" max="${max}" step="${step}">`;
   const [lab, num, rng] = [wrap.children[0], wrap.children[1], wrap.children[2]];
   if (opts.track) rng.style.setProperty("--track", opts.track);
-  const def = () => getPath(state.cfg.default_edit, path) ?? 0;
+  // Grade sliders reset to neutral (0); everything else to the app default.
+  const def = () => (path.startsWith("grade.") ? state.cfg.neutral_grade[path.slice(6)]
+    : getPath(state.cfg.default_edit, path)) ?? 0;
   const set = (v) => {
     v = clamp(parseFloat(v), min, max);
     if (isNaN(v)) return;
@@ -323,6 +325,9 @@ function buildPanel() {
   co.append(slider(g("tint"), "Tint", -100, 100, 1, { track: "linear-gradient(90deg,#22c55e,#9ca3af,#d946ef)" }));
   co.append(slider(g("vibrance"), "Vibrance"));
   co.append(slider(g("saturation"), "Saturation"));
+  co.append(el(`<div class="sec-sub">Blues (sky &amp; water)</div>`));
+  co.append(slider(g("blue_sat"), "Blues saturation", -100, 100, 1, { track: "linear-gradient(90deg,#6b7c8f,#1e90ff)" }));
+  co.append(slider(g("blue_lum"), "Blues brightness", -100, 100, 1, { track: "linear-gradient(90deg,#0b2a55,#1e6fd0,#8fd3ff)" }));
   const hues = "linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)";
   co.append(el(`<div class="sec-sub">Split toning</div>`));
   co.append(slider(g("shadow_hue"), "Shadow hue", 0, 360, 1, { track: hues }));
@@ -463,7 +468,7 @@ function allPresets() {
 
 function applyPreset(grade) {
   const keep = { lut: state.edit.grade.lut, lut_strength: state.edit.grade.lut_strength };
-  state.edit.grade = { ...clone(state.cfg.default_edit.grade), ...clone(grade), ...(grade.lut ? {} : keep) };
+  state.edit.grade = { ...clone(state.cfg.neutral_grade), ...clone(grade), ...(grade.lut ? {} : keep) };
   editChanged();
 }
 
@@ -491,7 +496,7 @@ async function loadPresetThumbs() {
   presetThumbFor = key;
   for (const b of $$("#presetGrid .preset")) {
     if (state.current !== item || presetThumbFor !== key) return;
-    const edit = { ...clone(state.edit), grade: { ...clone(state.cfg.default_edit.grade), ...b._grade }, stamp: { enabled: false }, vignette: 0, sharpen: 0 };
+    const edit = { ...clone(state.edit), grade: { ...clone(state.cfg.neutral_grade), ...b._grade }, stamp: { enabled: false }, vignette: 0, sharpen: 0 };
     try {
       const r = await fetch(`/api/media/${item.id}/preview`, {
         method: "POST", headers: { "Content-Type": "application/json" },

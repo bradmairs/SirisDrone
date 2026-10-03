@@ -67,3 +67,36 @@ def test_bad_cube_rejected(tmp_path):
     p.write_text("LUT_1D_SIZE 4\n0 0 0\n")
     with pytest.raises(ValueError):
         G.read_cube(p)
+
+
+def test_new_items_start_with_brm_blue():
+    from app.edits import normalize_edit
+    e = normalize_edit({})
+    assert e["grade"] == G.normalize_grade(G.PRESETS["BRM Blue"])
+    assert e["grade"]["blue_sat"] > 0
+    # an explicit grade is taken as-is (missing keys are neutral)
+    assert normalize_edit({"grade": {}})["grade"] == G.DEFAULT_GRADE
+
+
+def test_blues_controls_only_touch_blues():
+    px = np.array([[[0.25, 0.50, 0.85],    # sky blue
+                    [0.10, 0.35, 0.55],    # deep water
+                    [0.30, 0.55, 0.20],    # grass
+                    [0.85, 0.80, 0.70],    # sand
+                    [0.70, 0.30, 0.20],    # red cliff
+                    [0.50, 0.50, 0.50]]],  # grey
+                  np.float32)
+    out = G.grade_pixels(px, G.normalize_grade({"blue_sat": 80, "blue_lum": -40}))[0]
+    chroma = lambda c: c.max() - c.min()
+    assert chroma(out[0]) > chroma(px[0, 0]) + 0.05 and out[0] @ G.LUMA < px[0, 0] @ G.LUMA
+    assert chroma(out[1]) > chroma(px[0, 1])
+    assert np.allclose(out[2:], px[0, 2:], atol=0.01)
+
+
+def test_brm_blue_makes_skies_bluer_without_shifting_greens():
+    sky = np.array([[[0.45, 0.60, 0.75]]], np.float32)
+    grass = np.array([[[0.30, 0.45, 0.20]]], np.float32)
+    g = G.normalize_grade(G.HOUSE_GRADE)
+    s2, g2 = G.grade_pixels(sky, g)[0, 0], G.grade_pixels(grass, g)[0, 0]
+    assert (s2[2] - s2[0]) > (0.75 - 0.45) + 0.1   # sky noticeably more blue
+    assert g2[1] == g2.max()                        # grass is still green

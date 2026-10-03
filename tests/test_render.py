@@ -30,32 +30,35 @@ def test_normalize_edit_clamps_garbage():
                         "video": {"trim_start": 5, "trim_end": 2, "speed": 99}})
     assert e["crop"]["x"] == pytest.approx(0.5)
     assert e["sharpen"] == 100
-    assert e["stamp"]["position"] == "br" and e["stamp"]["color"] == "#ffffff"
+    assert e["stamp"]["position"] == "br" and e["stamp"]["color"] == "#000000"
     assert e["video"]["trim_end"] is None and e["video"]["speed"] == 4
 
 
-def test_stamp_sits_bottom_right():
+def test_default_stamp_matches_brm_posts():
+    """Black script, no shadow, ~24% of the short edge wide, ~2.7% in from the bottom-right corner."""
     mask = load_mask(DEFAULT_STAMP)
     s = normalize_edit({})["stamp"]
-    img, x, y = render_stamp(mask, 4000, 3000, s)
-    alpha = np.asarray(img)[..., 3]
-    ys, xs = np.nonzero(alpha > 128)
-    # opaque logo pixels end near the right/bottom margin (3% of 3000 = 90px)
-    assert 3000 - 90 - 40 < x + xs.max() <= 4000 - 90
-    assert 3000 - 90 - 40 < y + ys.max() <= 3000 - 90
-    assert x + xs.min() > 2000  # it is in the right half
+    assert s["color"] == "#000000" and s["shadow"] == 0 and s["position"] == "br"
+    img, x, y = render_stamp(mask, 1320, 992, s)
+    px = np.asarray(img)
+    ys, xs = np.nonzero(px[..., 3] > 128)
+    assert px[..., :3][px[..., 3] > 128].max() < 10           # black ink
+    assert abs((xs.max() - xs.min()) / 992 - 0.24) < 0.01      # width like the example post
+    assert abs(1320 - (x + xs.max()) - 27) <= 3                # right margin ≈ 26px in the example
+    assert abs(992 - (y + ys.max()) - 27) <= 3                 # bottom margin ≈ 28px
 
 
 def test_render_photo_applies_everything():
     src = Image.fromarray(np.full((600, 800, 3), 128, np.uint8))
     mask = load_mask(DEFAULT_STAMP)
-    edit = {"crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5}, "vignette": -80, "grade": {"exposure": 1}}
+    edit = {"crop": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5}, "vignette": -80, "grade": {"exposure": 1},
+            "stamp": {"enabled": True, "color": "#ffffff"}}
     out = render.render(src, edit, stamp_mask=mask)
     assert out.shape == (300, 400, 3)
     centre = out[150, 200]
     assert centre.mean() > 0.6                         # exposure brightened mid-grey
     assert out[2, 2].mean() < centre.mean() - 0.1      # vignette darkened the corner
-    assert out[260:296, 250:396].max() > 0.9           # white stamp bottom-right (90% opacity)
+    assert out[260:296, 250:396].max() > 0.9           # white stamp bottom-right
 
 
 def test_photo_matches_ffmpeg_pipeline(tmp_path):
