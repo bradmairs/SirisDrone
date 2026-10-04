@@ -112,6 +112,12 @@ def extract_frame(path: Path, meta: dict, t: float, long_edge: int | None = None
     return np.frombuffer(res.stdout[:need], dtype=dtype).reshape(h, w, 3)
 
 
+def browser_playable(path: Path, meta: dict) -> bool:
+    """8-bit H.264 in MP4/MOV plays in every browser; HEVC/10-bit/ProRes does not reliably."""
+    return (meta.get("codec") == "h264" and meta.get("pix_fmt") in ("yuv420p", "yuvj420p")
+            and path.suffix.lower() in (".mp4", ".mov", ".m4v"))
+
+
 def _atempo(speed: float) -> str:
     parts = []
     while speed < 0.5:
@@ -217,8 +223,12 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
 
 
 def export_command(src: Path, meta: dict, g: dict, out_path: Path, codec: str = "h264",
-                   quality: str = "high", keep_metadata: bool = True) -> list[str]:
+                   quality: str = "high", keep_metadata: bool = True,
+                   fast: bool = False) -> list[str]:
+    """`fast` trades size/quality for speed (used for in-app playback previews)."""
     label, ext, vargs, pix = CODECS[codec]
+    if fast and codec == "h264":
+        vargs = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high"]
     cmd = [FFMPEG, "-hide_banner", "-y", "-nostdin", "-loglevel", "error",
            "-ss", f"{g['start']:.3f}", "-t", f"{g['src_duration']:.3f}", "-i", str(src),
            *g["inputs"], "-filter_complex", g["filter"], "-map", "[vout]", *vargs]
@@ -230,7 +240,8 @@ def export_command(src: Path, meta: dict, g: dict, out_path: Path, codec: str = 
         cmd += ["-map", "0:a:0?"]
         if g["speed"] != 1:
             cmd += ["-af", _atempo(g["speed"])]
-        cmd += ["-c:a", "pcm_s16le"] if codec == "prores" else ["-c:a", "aac", "-b:a", "320k"]
+        cmd += (["-c:a", "pcm_s16le"] if codec == "prores"
+                else ["-c:a", "aac", "-b:a", "128k" if fast else "320k"])
     cmd += ["-map_metadata", "0" if keep_metadata else "-1", "-map_chapters", "-1"]
     if ext == ".mp4":
         cmd += ["-movflags", "+faststart"]

@@ -176,6 +176,7 @@ const saveEdit = debounce(async () => {
 
 function editChanged() {
   syncControls();
+  playerEditChanged();
   requestPreview();
   saveEdit();
   updateInfo();
@@ -405,8 +406,11 @@ function buildStampSection() {
   };
   $("#stampColor", sw).oninput = (e) => { state.edit.stamp.color = e.target.value; editChanged(); };
   st.append(sw);
-  const up = el(`<div class="row"><label class="btn sm">Use a different logo…<input type="file" accept="image/png,image/jpeg" hidden id="stampFile"></label>
-      <button class="link" id="stampReset">Restore BRM Highlife</button></div>`);
+  const def = el(`<button class="btn sm" id="stampDefaults" title="Black, bottom-right, original size, margin and opacity">↺ Reset stamp to default</button>`);
+  def.onclick = () => { state.edit.stamp = clone(state.cfg.default_edit.stamp); editChanged(); toast("Stamp reset to the BRM Highlife default"); };
+  st.append(def);
+  const up = el(`<div class="row" style="margin-top:8px"><label class="btn sm">Use a different logo…<input type="file" accept="image/png,image/jpeg" hidden id="stampFile"></label>
+      <button class="link" id="stampReset">Restore BRM Highlife logo</button></div>`);
   $("#stampFile", up).onchange = uploadStamp;
   $("#stampReset", up).onclick = resetStamp;
   st.append(up);
@@ -421,6 +425,7 @@ function buildStampSection() {
       const src = `/api/stamp?v=${state.stampVersion}`;
       if (img.getAttribute("src") !== src) img.src = src;
       $("#stampReset").hidden = !state.cfg.custom_stamp;
+      $("#stampDefaults").disabled = JSON.stringify(s) === JSON.stringify(state.cfg.default_edit.stamp);
     },
   });
 }
@@ -577,6 +582,7 @@ async function resetStamp() {
 // ---------------------------------------------------------------------------
 function setCropMode(on) {
   if (state.cropMode === on) return;
+  if (on) stopPlayback();
   state.cropMode = on;
   $("#cropToggle").classList.toggle("on", on);
   $("#cropLayer").hidden = true;
@@ -672,7 +678,7 @@ function initTimeline() {
     const r = track.getBoundingClientRect();
     state.t = clamp((e.clientX - r.left) / r.width, 0, 1) * (state.current.duration || 0);
     updateTimeline();
-    requestPreview();
+    if (playerVisible()) seekVideoTo(state.t); else requestPreview();
   };
   track.addEventListener("pointerdown", (e) => { dragging = true; track.setPointerCapture(e.pointerId); seek(e); });
   track.addEventListener("pointermove", (e) => dragging && seek(e));
@@ -681,6 +687,132 @@ function initTimeline() {
   $("#setOutBtn").onclick = setOut;
   $("#clearTrimBtn").onclick = () => { state.edit.video.trim_start = 0; state.edit.video.trim_end = null; editChanged(); updateTimeline(); };
   $("#grabBtn").onclick = grabFrame;
+  initPlayer();
+}
+
+// ---------------------------------------------------------------------------
+// video playback
+// ---------------------------------------------------------------------------
+const player = { mode: "original", seq: 0, key: null, stale: false };
+const videoEl = () => $("#previewVideo");
+const playerVisible = () => !videoEl().hidden;
+
+function setPlayStatus(text) { $("#playStatus").textContent = text || ""; }
+
+// Map between the source clip's time and the playing file's time.
+function toVideoTime(t) {
+  if (player.mode === "original") return t;
+  const v = state.edit.video;
+  return Math.max(0, (t - v.trim_start) / v.speed);
+}
+function toSourceTime(vt) {
+  if (player.mode === "original") return vt;
+  const v = state.edit.video;
+  return v.trim_start + vt * v.speed;
+}
+function seekVideoTo(t) {
+  const vid = videoEl();
+  if (vid.readyState >= 1) vid.currentTime = clamp(toVideoTime(t), 0, vid.duration || 0);
+}
+
+function showPlayer(on) {
+  videoEl().hidden = !on;
+  $("#previewImg").hidden = on;
+  if (on) $("#cropLayer").hidden = true;
+}
+
+async function startPlayback() {
+  const item = state.current;
+  if (!item || item.kind !== "video") return;
+  if (state.cropMode) setCropMode(false);
+  const seq = ++player.seq;
+  player.stale = false;
+  setPlayStatus(player.mode === "edited" ? "Rendering preview with your edits…" : "Preparing video…");
+  $("#playBtn").disabled = true;
+  try {
+    let st = await api("POST", `/api/media/${item.id}/playback`, { mode: player.mode, edit: state.edit });
+    while (st.status === "queued" || st.status === "rendering") {
+      if (seq !== player.seq) return;
+      const pct = Math.round(st.progress * 100);
+      setPlayStatus(player.mode === "edited" ? `Rendering preview with your edits… ${pct}%`
+        : `Making a playable copy (H.265 / 10-bit clips need converting)… ${pct}%`);
+      await new Promise((r) => setTimeout(r, 600));
+      st = await api("GET", `/api/playback/${st.key}`);
+    }
+    if (seq !== player.seq) return;
+    if (st.status !== "ready") throw new Error(st.error || "Preview was cancelled");
+    const vid = videoEl();
+    if (player.key !== st.key) {
+      player.key = st.key;
+      vid.src = st.url;
+      await new Promise((res, rej) => {
+        vid.onloadedmetadata = res;
+        vid.onerror = () => rej(new Error("This browser can't play this video"));
+      });
+    }
+    if (seq !== player.seq) return;
+    showPlayer(true);
+    const start = toVideoTime(state.t);
+    vid.currentTime = start >= (vid.duration || 0) - 0.05 ? 0 : start;
+    setPlayStatus(player.mode === "edited" ? "Preview with edits (lower resolution)" : "");
+    await vid.play().catch(() => {});
+  } catch (e) {
+    setPlayStatus("");
+    toast(e.message, "error");
+  } finally {
+    if (seq === player.seq) $("#playBtn").disabled = false;
+  }
+}
+
+function stopPlayback(unload = false) {
+  player.seq++;
+  const vid = videoEl();
+  vid.pause();
+  if (unload) { player.key = null; vid.removeAttribute("src"); vid.load(); }
+  if (playerVisible()) { showPlayer(false); requestPreview(); }
+  setPlayStatus("");
+  $("#playBtn").disabled = false;
+}
+
+function togglePlay() {
+  const vid = videoEl();
+  if (playerVisible() && !player.stale && vid.readyState >= 1) {
+    vid.paused ? vid.play() : vid.pause();
+  } else {
+    startPlayback();
+  }
+}
+
+// After an edit, an "edited" preview is out of date and a paused player hides the new still.
+function playerEditChanged() {
+  if (!playerVisible()) return;
+  const vid = videoEl();
+  if (player.mode === "edited") {
+    player.stale = true;
+    player.key = null;
+    setPlayStatus("Edits changed – press Play to render them");
+  }
+  if (vid.paused) stopPlayback();
+}
+
+function initPlayer() {
+  const vid = videoEl();
+  vid.addEventListener("timeupdate", () => {
+    if (!playerVisible()) return;
+    state.t = clamp(toSourceTime(vid.currentTime), 0, state.current?.duration || 0);
+    updateTimeline();
+  });
+  vid.addEventListener("play", () => { $("#playBtn").textContent = "❚❚ Pause"; });
+  vid.addEventListener("pause", () => { $("#playBtn").textContent = "▶ Play"; });
+  $("#playBtn").onclick = togglePlay;
+  $("#playMode").onclick = (e) => {
+    const m = e.target.closest("button")?.dataset.m;
+    if (!m || m === player.mode) return;
+    player.mode = m;
+    player.key = null;
+    $$("#playMode button").forEach((b) => b.classList.toggle("on", b.dataset.m === m));
+    if (playerVisible()) startPlayback();
+  };
 }
 function setIn() {
   const v = state.edit.video;
@@ -823,6 +955,7 @@ async function selectItem(id) {
   state.t = item.kind === "video" ? Math.min(state.edit.video.trim_start || 0, item.duration || 0) : 0;
   state.frame = null;
   presetThumbFor = null;
+  stopPlayback(true);
   if (state.cropMode) { state.cropMode = false; $("#cropToggle").classList.remove("on"); $("#cropLayer").hidden = true; }
   renderLibrary();
   syncControls();
@@ -1013,16 +1146,16 @@ function openExport() {
   $("#exFolder").value = o.folder;
   $("#exPhotoFmt").value = o.photo_format;
   $("#exQuality").value = o.jpeg_quality;
-  $("#exPhotoSize").value = String(o.photo_size);
+  setSizeSelect("#exPhotoSize", o.photo_size);
   $("#exCodec").innerHTML = Object.entries(state.cfg.codecs).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
   $("#exCodec").value = o.video_codec;
   $("#exVQual").value = o.video_quality;
-  $("#exVSize").value = String(o.video_size);
+  setSizeSelect("#exVSize", o.video_size);
   $("#exFps").value = String(o.video_fps === "source" ? "source" : Math.round(o.video_fps));
   $("#exMeta").checked = o.keep_metadata;
   $("#exGps").checked = o.strip_gps;
   $("#exOverwrite").checked = o.overwrite;
-  $("#exSuffix").value = o.suffix;
+  $("#exName").value = o.name_pattern;
   $("#exSelN").textContent = state.selected.size;
   $("#exAllN").textContent = state.items.length;
   setScope(state.selected.size > 1 ? "selected" : "current");
@@ -1035,7 +1168,53 @@ function setScope(s) {
   $$("#exportScope button").forEach((b) => b.classList.toggle("on", b.dataset.s === s));
 }
 
+// Size options: "original", a long edge ("3840"), or a fit-inside box ("1080x1350", "x1080").
+function setSizeSelect(sel, value) {
+  const s = $(sel), box = $(s.dataset.custom);
+  value = String(value);
+  const known = [...s.options].some((o) => o.value === value);
+  s.value = known ? value : "custom";
+  box.hidden = known;
+  if (!known && value !== "original") {
+    const [w, h] = value.includes("x") ? value.split("x") : [value, value];
+    $$("input", box)[0].value = w; $$("input", box)[1].value = h;
+  }
+}
+
+function sizeValue(sel) {
+  const s = $(sel);
+  if (s.value !== "custom") return s.value;
+  const [w, h] = $$("input", $(s.dataset.custom)).map((i) => i.value.trim());
+  return w || h ? `${w}x${h}` : "original";
+}
+
+function outputDims(w, h, spec, even) {
+  let k = 1;
+  if (/^\d+$/.test(spec)) k = +spec / Math.max(w, h);
+  else if (spec.includes("x")) {
+    const [bw, bh] = spec.split("x").map((v) => (v ? +v : null));
+    const ks = [bw && bw / w, bh && bh / h].filter(Boolean);
+    if (ks.length) k = Math.min(...ks);
+  }
+  let ow = Math.max(2, Math.round(w * k)), oh = Math.max(2, Math.round(h * k));
+  if (even) { ow -= ow % 2; oh -= oh % 2; }
+  return `${ow} × ${oh} px`;
+}
+
 function updateExportHints() {
+  for (const sel of ["#exPhotoSize", "#exVSize"]) $($(sel).dataset.custom).hidden = $(sel).value !== "custom";
+  const it = state.current;
+  if (it && state.edit) {
+    const f = frameSize(it, state.edit), c = state.edit.crop;
+    const w = f.w * c.w, h = f.h * c.h;
+    $("#exPhotoResult").textContent = it.kind === "photo" ? `This photo → ${outputDims(w, h, sizeValue("#exPhotoSize"), false)}` : "";
+    $("#exVideoResult").textContent = it.kind === "video" ? `This video → ${outputDims(w, h, sizeValue("#exVSize"), true)}` : "";
+  }
+  const stem = (it?.name || "DJI_0001.JPG").replace(/\.[^.]+$/, "");
+  const today = new Date().toISOString().slice(0, 10);
+  const example = ($("#exName").value.trim() || "{name}").replaceAll("{name}", stem)
+    .replaceAll("{date}", today).replaceAll("{n}", "001").replace(/[\\/:*?"<>|]/g, "");
+  $("#exNameExample").textContent = example + (it?.kind === "video" ? ".mp4" : ".jpg");
   $("#exQualOut").textContent = $("#exQuality").value;
   $("#exQualRow").hidden = $("#exPhotoFmt").value !== "jpeg";
   const root = state.cfg.output_roots.find((r) => r.name === $("#exRoot").value);
@@ -1048,17 +1227,18 @@ function exportOptions() {
   return {
     root: $("#exRoot").value, folder: $("#exFolder").value.trim(),
     photo_format: $("#exPhotoFmt").value, jpeg_quality: +$("#exQuality").value,
-    photo_size: $("#exPhotoSize").value, video_codec: $("#exCodec").value,
-    video_quality: $("#exVQual").value, video_size: $("#exVSize").value, video_fps: $("#exFps").value,
+    photo_size: sizeValue("#exPhotoSize"), video_codec: $("#exCodec").value,
+    video_quality: $("#exVQual").value, video_size: sizeValue("#exVSize"), video_fps: $("#exFps").value,
     keep_metadata: $("#exMeta").checked, strip_gps: $("#exGps").checked,
-    overwrite: $("#exOverwrite").checked, suffix: $("#exSuffix").value,
+    overwrite: $("#exOverwrite").checked, name_pattern: $("#exName").value,
   };
 }
 
 function initExport() {
   $("#exportBtn").onclick = openExport;
   $("#exportScope").onclick = (e) => { const s = e.target.closest("button")?.dataset.s; if (s) setScope(s); };
-  ["#exPhotoFmt", "#exQuality", "#exRoot", "#exFolder"].forEach((s) => $(s).addEventListener("input", updateExportHints));
+  ["#exPhotoFmt", "#exQuality", "#exRoot", "#exFolder", "#exName", "#exPhotoSize", "#exVSize", "#exPhotoCustom", "#exVideoCustom"]
+    .forEach((s) => $(s).addEventListener("input", updateExportHints));
   $("#exBrowse").onclick = async () => {
     $("#exportDlg").close();
     const pick = await openBrowser("output", $("#exRoot").value, $("#exFolder").value.trim());
@@ -1133,6 +1313,7 @@ function initJobs() {
 // ---------------------------------------------------------------------------
 function setBefore(on) {
   if (state.before === on || !state.current) return;
+  if (on) stopPlayback();
   state.before = on;
   $("#beforeBadge").hidden = !on;
   $("#beforeBtn").classList.toggle("on", on);
@@ -1167,7 +1348,8 @@ function initViewer() {
     if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
     if (e.key === "b" || e.key === "\\") { setBefore(true); e.preventDefault(); }
     else if (e.key === "c") setCropMode(!state.cropMode);
-    else if (e.key === "Escape") setCropMode(false);
+    else if (e.key === "Escape") { setCropMode(false); stopPlayback(); }
+    else if (e.key === " " && state.current?.kind === "video") { e.preventDefault(); togglePlay(); }
     else if (e.key === "ArrowLeft") navigate(-1);
     else if (e.key === "ArrowRight") navigate(1);
     else if (e.key === "i" && state.current?.kind === "video") setIn();

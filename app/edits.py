@@ -126,13 +126,19 @@ class Geometry:
         """Top-left of the straightened frame inside the rotated (oriented) canvas."""
         return (self.ow - self.fw) / 2, (self.oh - self.fh) / 2
 
-    def output_size(self, long_edge: int | None = None, even: bool = False,
+    def output_size(self, long_edge: int | tuple | None = None, even: bool = False,
                     allow_upscale: bool = True) -> tuple[int, int]:
+        """Output pixels. `long_edge` is a long-edge length, or a (max_w, max_h) box
+        (either may be None) that the crop is fitted inside, keeping its shape."""
         w, h = self.cw, self.ch
-        if long_edge:
-            k = long_edge / max(w, h)
-            if k < 1 or allow_upscale:
-                w, h = w * k, h * k
+        if isinstance(long_edge, (tuple, list)):
+            bw, bh = long_edge
+            ks = [b / d for b, d in ((bw, w), (bh, h)) if b]
+            k = min(ks) if ks else 1.0
+        else:
+            k = long_edge / max(w, h) if long_edge else 1.0
+        if k < 1 or allow_upscale:
+            w, h = w * k, h * k
         w, h = max(int(round(w)), 2), max(int(round(h)), 2)
         if even:
             w, h = w - w % 2, h - h % 2

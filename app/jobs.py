@@ -19,10 +19,10 @@ from .edits import normalize_edit
 DEFAULT_EXPORT = {
     "root": None,             # name of an output root (e.g. "NAS")
     "folder": "",             # sub-folder inside it, created if missing
-    "suffix": "_BRM",
+    "name_pattern": "{name}_BRM",  # tokens: {name} {date} {n}
     "photo_format": "jpeg",   # jpeg | png | tiff16
     "jpeg_quality": 95,
-    "photo_size": "original", # "original" or long-edge pixels
+    "photo_size": "original", # "original", long-edge pixels, or a "WxH" box ("1080x1350", "x1080")
     "video_codec": "h264",    # h264 | h265 | prores
     "video_quality": "high",  # max | high | standard
     "video_size": "original",
@@ -33,25 +33,79 @@ DEFAULT_EXPORT = {
 }
 
 
+NAME_TOKENS = ("{name}", "{date}", "{n}")
+_BAD_CHARS = r'[\\/:*?"<>|\x00-\x1f]'
+
+
+def _parse_size(v):
+    """"original" | long edge int | "WxH" box with either side optional."""
+    v = str(v).strip().lower().replace(" ", "").replace("×", "x")
+    if v.isdigit() and 64 <= int(v) <= 16384:
+        return int(v)
+    m = re.fullmatch(r"(\d*)x(\d*)", v)
+    if m and any(m.groups()):
+        w, h = (int(x) if x else None for x in m.groups())
+        if all(d is None or 64 <= d <= 16384 for d in (w, h)):
+            return f"{w or ''}x{h or ''}"
+    return "original"
+
+
+def size_spec(v):
+    """Turn a normalised size option into what render/build_graph take."""
+    if v == "original":
+        return None
+    if isinstance(v, int):
+        return v
+    w, h = v.split("x")
+    return (int(w) if w else None, int(h) if h else None)
+
+
 def normalize_export(opts: dict | None) -> dict:
-    o = {**DEFAULT_EXPORT, **{k: v for k, v in (opts or {}).items() if k in DEFAULT_EXPORT}}
+    opts = dict(opts or {})
+    if "name_pattern" not in opts and "suffix" in opts:  # settings saved by older versions
+        opts["name_pattern"] = "{name}" + str(opts["suffix"] or "")
+    o = {**DEFAULT_EXPORT, **{k: v for k, v in opts.items() if k in DEFAULT_EXPORT}}
     o["photo_format"] = o["photo_format"] if o["photo_format"] in render.PHOTO_FORMATS else "jpeg"
     o["video_codec"] = o["video_codec"] if o["video_codec"] in video.CODECS else "h264"
     o["video_quality"] = o["video_quality"] if o["video_quality"] in ("max", "high", "standard") else "high"
     o["jpeg_quality"] = int(min(max(float(o["jpeg_quality"] or 95), 50), 100))
     for k in ("photo_size", "video_size"):
-        v = str(o[k])
-        o[k] = int(v) if v.isdigit() and 256 <= int(v) <= 16384 else "original"
+        o[k] = _parse_size(o[k])
     f = str(o["video_fps"])
     try:
         o["video_fps"] = float(f) if f != "source" and 1 <= float(f) <= 240 else "source"
     except ValueError:
         o["video_fps"] = "source"
-    o["suffix"] = re.sub(r'[\\/:*?"<>|]', "", str(o["suffix"] or ""))[:40]
+    pattern = re.sub(_BAD_CHARS, "", str(o["name_pattern"] or "")).strip().strip(".")[:120]
+    o["name_pattern"] = pattern or "{name}"
     o["folder"] = str(o["folder"] or "").strip().strip("/\\")
     for k in ("keep_metadata", "strip_gps", "overwrite"):
         o[k] = bool(o[k])
     return o
+
+
+def output_stem(pattern: str, name: str, date: str, n: int) -> str:
+    stem = (pattern.replace("{name}", name).replace("{date}", date)
+            .replace("{n}", f"{n:03d}"))
+    stem = re.sub(_BAD_CHARS, "", stem).strip().strip(".")
+    return stem or name
+
+
+def capture_date(exif_bytes=None, creation_time: str | None = None) -> str:
+    """YYYY-MM-DD the shot was taken (EXIF / video metadata), else today."""
+    if exif_bytes:
+        try:
+            from PIL import Image
+            ex = Image.Exif()
+            ex.load(exif_bytes)
+            raw = ex.get_ifd(0x8769).get(36867) or ex.get(306)
+            if raw:
+                return str(raw)[:10].replace(":", "-")
+        except Exception:
+            pass
+    if creation_time and re.match(r"\d{4}-\d{2}-\d{2}", creation_time):
+        return creation_time[:10]
+    return time.strftime("%Y-%m-%d")
 
 
 @dataclass
@@ -144,7 +198,7 @@ def _unique_path(folder: Path, stem: str, ext: str, overwrite: bool) -> Path:
 
 
 def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
-                 stamp_mask, job: Job, frame: tuple | None = None) -> str:
+                 stamp_mask, job: Job, frame: tuple | None = None, n: int = 1) -> str:
     """Render a photo (or a video frame when `frame=(meta, t)`) at full quality."""
     edit = normalize_edit(edit)
     job.progress = 0.05
@@ -153,18 +207,20 @@ def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
         src = render.from_array(video.extract_frame(src_path, meta, t, bits=16))
         info = {}
         stem = f"{Path(name).stem}_{int(t // 60):02d}m{t % 60:05.2f}s".replace(".", "-")
+        date = capture_date(creation_time=meta.get("creation_time"))
     else:
         src, info = render.load_photo(src_path)
         stem = Path(name).stem
+        date = capture_date(info.get("exif"))
     if job.cancel.is_set():
         raise InterruptedError
     job.progress = 0.35
-    long_edge = opts["photo_size"] if opts["photo_size"] != "original" else None
-    rgb = render.render(src, edit, long_edge=long_edge, stamp_mask=stamp_mask, allow_upscale=True)
+    rgb = render.render(src, edit, long_edge=size_spec(opts["photo_size"]), stamp_mask=stamp_mask,
+                        allow_upscale=True)
     del src
     job.progress = 0.8
     ext = render.PHOTO_FORMATS[opts["photo_format"]]
-    final = _unique_path(dest, stem + opts["suffix"], ext, opts["overwrite"])
+    final = _unique_path(dest, output_stem(opts["name_pattern"], stem, date, n), ext, opts["overwrite"])
     tmp = dest / f".{final.name}.part"
     try:
         render.save_photo(rgb, tmp, opts["photo_format"], opts["jpeg_quality"], info,
@@ -176,15 +232,17 @@ def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
 
 
 def export_video(src_path: Path, meta: dict, name: str, edit: dict, opts: dict, dest: Path,
-                 stamp_mask, job: Job) -> str:
+                 stamp_mask, job: Job, n: int = 1) -> str:
     codec = opts["video_codec"]
     ext = video.CODECS[codec][1]
-    final = _unique_path(dest, Path(name).stem + opts["suffix"], ext, opts["overwrite"])
+    stem = output_stem(opts["name_pattern"], Path(name).stem,
+                       capture_date(creation_time=meta.get("creation_time")), n)
+    final = _unique_path(dest, stem, ext, opts["overwrite"])
     tmp = dest / f".{final.name}.part"
     with tempfile.TemporaryDirectory(prefix="siris-") as work:
         g = video.build_graph(
             meta, edit, Path(work), stamp_mask,
-            long_edge=opts["video_size"] if opts["video_size"] != "original" else None,
+            long_edge=size_spec(opts["video_size"]),
             fps=opts["video_fps"] if opts["video_fps"] != "source" else None,
             out_pix_fmt=video.CODECS[codec][3], allow_upscale=True)
         cmd = video.export_command(src_path, meta, g, tmp, codec, opts["video_quality"],

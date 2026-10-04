@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import grading, jobs, render, video
+from .playback import Playback
 from .config import DEFAULT_STAMP, STATIC_DIR, Config, resolve_in_root
 from .edits import DEFAULT_EDIT, normalize_edit
 from .library import Library, media_kind
@@ -28,8 +29,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     tempfile.tempdir = str(cfg.tmp_dir)
     lib = Library(cfg.media_dir)
     queue = jobs.JobQueue()
+    playback = Playback()
     app = FastAPI(title="SirisDrone Studio", docs_url="/api/docs")
     app.state.cfg, app.state.lib, app.state.jobs = cfg, lib, queue
+    app.state.playback = playback
 
     def lut_path(lut_id: str) -> Path | None:
         return cfg.lut_dir / f"{lut_id}.cube" if lut_id.isalnum() else None
@@ -204,6 +207,40 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return Response(render.encode_jpeg(rgb, 88), media_type="image/jpeg",
                         headers={"X-Width": str(w), "X-Height": str(h), "Cache-Control": "no-store"})
 
+    # -- video playback -------------------------------------------------------------
+    def playback_public(state: dict) -> dict:
+        out = {k: v for k, v in state.items() if k != "path"}
+        if state["status"] == "ready":
+            out["url"] = f"/api/playback/{state['key']}/file"
+        return out
+
+    @app.post("/api/media/{mid}/playback")
+    def request_playback(mid: str, body: dict = Body(...)):
+        """mode "original" plays the clip as shot; "edited" renders a quick preview of the edit."""
+        item = item_or_404(mid)
+        if item["kind"] != "video":
+            raise HTTPException(400, "Only videos can be played")
+        mode = "edited" if body.get("mode") == "edited" else "original"
+        edit = body.get("edit") if body.get("edit") is not None else lib.get_edit(mid)
+        sf = stamp_file()
+        state = playback.request(item, lib.source_path(item), cfg.media_dir / mid, mode, edit,
+                                 stamp_mask(), f"{sf}:{sf.stat().st_mtime}")
+        return playback_public(state)
+
+    @app.get("/api/playback/{key}")
+    def playback_status(key: str):
+        state = playback.get(key)
+        if not state:
+            raise HTTPException(404, "Unknown playback")
+        return playback_public(state)
+
+    @app.get("/api/playback/{key}/file")
+    def playback_file(key: str):
+        state = playback.get(key)
+        if not state or state["status"] != "ready" or not Path(state["path"]).exists():
+            raise HTTPException(404, "Not ready")
+        return FileResponse(state["path"], media_type="video/mp4", headers={"Cache-Control": "no-cache"})
+
     # -- LUTs --------------------------------------------------------------------
     def list_luts():
         out = []
@@ -311,22 +348,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         mask = stamp_mask()
         created = []
         frame_time = body.get("frame_time")
-        for mid in body.get("media_ids", []):
+        for n, mid in enumerate(body.get("media_ids", []), start=1):
             item = item_or_404(mid)
             edit = lib.get_edit(mid)
             src = lib.source_path(item)
             if frame_time is not None and item["kind"] == "video":
                 t = float(frame_time)
-                run = (lambda job, s=src, it=item, e=edit, t=t:
-                       jobs.export_photo(s, it["name"], e, opts, dest, mask, job, frame=(it, t)))
+                run = (lambda job, s=src, it=item, e=edit, t=t, n=n:
+                       jobs.export_photo(s, it["name"], e, opts, dest, mask, job, frame=(it, t), n=n))
                 kind = "frame"
             elif item["kind"] == "video":
-                run = (lambda job, s=src, it=item, e=edit:
-                       jobs.export_video(s, it, it["name"], e, opts, dest, mask, job))
+                run = (lambda job, s=src, it=item, e=edit, n=n:
+                       jobs.export_video(s, it, it["name"], e, opts, dest, mask, job, n=n))
                 kind = "video"
             else:
-                run = (lambda job, s=src, it=item, e=edit:
-                       jobs.export_photo(s, it["name"], e, opts, dest, mask, job))
+                run = (lambda job, s=src, it=item, e=edit, n=n:
+                       jobs.export_photo(s, it["name"], e, opts, dest, mask, job, n=n))
                 kind = "photo"
             created.append(queue.submit(mid, item["name"], kind, run).public())
         return {"jobs": created, "destination": str(dest)}

@@ -17,10 +17,10 @@ on the machine running the app, ideally the NAS itself.
 | **Presets** | BRM Blue, Natural, Vivid Aerial, Clear Skies, Golden Hour, Teal & Orange, Moody, Cinematic Fade, Tropical, Black & White, D-Log M quick fix. Each one shows a live thumbnail of your shot. Save your own looks, and use *Set as default* to change what new uploads start with. |
 | **LUTs** | Upload `.cube` LUTs, e.g. DJI's official D-Log M → Rec.709 LUT, with a strength slider. |
 | **Detail** | Sharpen and vignette. |
-| **BRM Highlife stamp** | On by default and placed like your posts: black script, bottom-right, about a quarter of the image's short edge wide, with a small margin. Adjust size, margin, opacity, drop shadow, colour (white / black / gold / any) and position, e.g. switch to white on dark shots. You can swap in another logo (a transparent PNG works best). |
-| **Video** | Scrub through the clip, trim in/out, change speed (0.25×–4× for slow-mo or hyperlapse), remove audio, and save any frame as a full-resolution photo. |
+| **BRM Highlife stamp** | On by default and placed like your posts: black script, bottom-right, about a quarter of the image's short edge wide, with a small margin. Adjust size, margin, opacity, drop shadow, colour (white / black / gold / any) and position, e.g. switch to white on dark shots. **Reset stamp to default** puts it back to black, bottom-right, original size in one click. You can swap in another logo (a transparent PNG works best). |
+| **Video** | **Play clips inside the app**: *Original* plays the clip as shot (H.265 / 10-bit DJI clips get a playable H.264 copy automatically), and *With edits* renders a quick preview with your grade, crop, trim, speed and stamp. You can also scrub, trim in/out, change speed (0.25×–4× for slow-mo or hyperlapse), remove audio, and save any frame as a full-resolution photo. |
 | **Batch** | Copy and paste settings, apply settings to many selected items, set a default look for new uploads, and export many items at once. |
-| **Export** | Full resolution or resized. JPEG (quality slider), 16-bit TIFF or PNG for photos. H.264, H.265 10-bit or ProRes 422 HQ for video. Keeps camera EXIF (with an option to **remove GPS**), never overwrites unless asked, and writes files atomically so a half-finished export never appears on the NAS. |
+| **Export** | Full resolution, a preset size (4K, 2.7K, 1080p, Instagram 1080 × 1350, Reels 1080 × 1920…) or a **custom width × height** box; the crop is fitted inside without stretching, and the dialog shows the exact output size. **File names** follow a pattern such as `{name}_BRM` or `{date} Golden Bay {n}`. JPEG (quality slider), 16-bit TIFF or PNG for photos. H.264, H.265 10-bit or ProRes 422 HQ for video, with a frame-rate choice. Keeps camera EXIF (with an option to **remove GPS**), never overwrites unless asked, and writes files atomically so a half-finished export never appears on the NAS. |
 | **Live preview** | Before/after comparison (hold **B**) and a histogram. The preview uses exactly the same colour pipeline as the export, so what you see is what you get. |
 
 ## Running it
@@ -92,7 +92,7 @@ The app can only read and write inside these folders.
 *Apply settings…* to copy the current look to all of them, and *Export… →
 Selected*.
 
-**Shortcuts:** `←`/`→` previous/next · hold `B` before/after · `C` crop ·
+**Shortcuts:** `←`/`→` previous/next · `Space` play/pause video · hold `B` before/after · `C` crop ·
 `I`/`O` set video trim in/out · `Esc` leave crop.
 
 **D-Log / HLG footage:** upload your drone maker's official Rec.709 LUT in
