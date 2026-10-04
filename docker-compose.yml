@@ -5,6 +5,10 @@ services:
     build: .
     container_name: sirisdrone-studio
     restart: unless-stopped
+    # Run as your NAS account so exported files belong to you (and you can rename/delete
+    # them over SMB). Find the numbers with `id <your-user>` over SSH; 1026:100 is the
+    # usual first user on Synology. Make sure ./data is writable by that user.
+    # user: "1026:100"
     ports:
       - "8080:8080"
     environment:

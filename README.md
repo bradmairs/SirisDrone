@@ -39,9 +39,12 @@ TrueNAS and any other system with Docker.
      - /volume1/Drone/Exports:/nas/exports     # finished files go here
      - /volume1/Drone/Footage:/nas/footage:ro  # optional: import without uploading
    ```
-3. Run `docker compose up -d --build`. On Synology you can also create a
+3. Optional but recommended: uncomment `user: "1026:100"` and set it to your NAS
+   account's UID:GID (`id <your-user>` over SSH). Exported files then belong to
+   you instead of `root`, so you can rename or delete them from your PC.
+4. Run `docker compose up -d --build`. On Synology you can also create a
    *Project* in Container Manager from this folder.
-4. Open `http://<nas-ip>:8080` in a browser.
+5. Open `http://<nas-ip>:8080` in a browser.
 
 ### Option B – on a PC with the NAS share mounted
 
