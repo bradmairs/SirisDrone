@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+pillow>=10.3
+numpy>=1.26
+tifffile>=2024.1.30
+rawpy>=0.21   # DNG support
