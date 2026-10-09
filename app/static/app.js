@@ -300,6 +300,9 @@ function buildPanel() {
   cr.append(slider("straighten", "Straighten (°)", -45, 45, 0.1, {
     onChange: () => { if (!state.cropMode) setCropMode(true); editChanged(); },
   }));
+  const lv = el(`<button class="btn sm" title="Find the horizon and level it">⟂ Auto-level horizon</button>`);
+  lv.onclick = () => runAuto({ horizon: true, exposure: false });
+  cr.append(lv);
   cr.append(el(`<p class="hint">Drag the box on the image to crop. Straightening zooms in just enough to hide the corners.</p>`));
   const rc = el(`<button class="btn sm">Reset crop &amp; rotation</button>`);
   rc.onclick = () => {
@@ -311,6 +314,11 @@ function buildPanel() {
 
   // Light
   const li = section("light", "Light", true);
+  const ab = el(`<div class="btn-row"><button class="btn sm primary" title="Level the horizon and set exposure">✨ Auto fix</button>
+      <button class="btn sm" title="Set exposure only">Auto exposure</button></div>`);
+  ab.children[0].onclick = () => runAuto({ horizon: true, exposure: true });
+  ab.children[1].onclick = () => runAuto({ horizon: false, exposure: true });
+  li.append(ab);
   li.append(slider(g("exposure"), "Exposure (EV)", -3, 3, 0.05));
   li.append(slider(g("contrast"), "Contrast"));
   li.append(slider(g("highlights"), "Highlights"));
@@ -337,11 +345,11 @@ function buildPanel() {
   co.append(slider(g("highlight_sat"), "Highlight amount", 0, 100));
   co.append(el(`<div class="sec-sub">LUT (.cube)</div>`));
   const lutRow = el(`<div class="row"><select id="lutSel"></select>
-      <label class="btn sm" title="Upload a .cube LUT, e.g. DJI's official D-Log M to Rec.709 LUT">Upload<input type="file" accept=".cube" hidden id="lutFile"></label>
+      <label class="btn sm" title="Upload a .cube LUT, e.g. a D-Cinelike → Rec.709 LUT">Upload<input type="file" accept=".cube" hidden id="lutFile"></label>
       <button class="btn sm" id="lutDel" title="Delete this LUT">✕</button></div>`);
   co.append(lutRow);
   co.append(slider(g("lut_strength"), "LUT strength", 0, 100));
-  co.append(el(`<p class="hint">Shooting D-Log / D-Log M? Upload your drone maker's Rec.709 LUT here, then fine-tune with the sliders.</p>`));
+  co.append(el(`<p class="hint">Mini 3 Pro D-Cinelike footage: use the “D-Cinelike → BRM Blue” preset, or upload a .cube LUT here and fine-tune with the sliders.</p>`));
   $("#lutSel", lutRow).onchange = (e) => { state.edit.grade.lut = e.target.value || null; editChanged(); };
   $("#lutFile", lutRow).onchange = uploadLut;
   $("#lutDel", lutRow).onclick = deleteLut;
@@ -358,6 +366,19 @@ function buildPanel() {
   const fx = section("effects", "Detail &amp; Effects");
   fx.append(slider("sharpen", "Sharpen", 0, 100));
   fx.append(slider("vignette", "Vignette", -100, 100, 1, { track: "linear-gradient(90deg,#000,#3a4553,#fff)" }));
+
+  const sky = section("sky", "Sky (graduated filter)");
+  sky.append(slider("grad.strength", "Strength", 0, 100));
+  sky.append(slider("grad.height", "Fade out by (% from top)", 5, 100));
+  const gs = el(`<div class="field"><label>Filter colour</label><div class="swatches" id="gradSw">
+      <button class="swatch" data-c="#000000" style="background:#000" title="Neutral (darken)"></button>
+      <button class="swatch" data-c="#1e4a8a" style="background:#1e4a8a" title="Deep blue (BRM)"></button>
+      <button class="swatch" data-c="#0f6a80" style="background:#0f6a80" title="Teal"></button>
+      <button class="swatch" data-c="#8a4a1e" style="background:#8a4a1e" title="Warm sunset"></button></div></div>`);
+  gs.onclick = (e) => { const c = e.target.closest(".swatch")?.dataset.c; if (c) { state.edit.grad.color = c; editChanged(); } };
+  sky.append(gs);
+  sky.append(el(`<p class="hint">Darkens or deepens the top of the frame – great for bright, washed-out skies.</p>`));
+  controls.push({ sync() { $$("#gradSw .swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === state.edit.grad.color)); } });
 
   buildStampSection();
   buildVideoSection();
@@ -419,7 +440,7 @@ function buildStampSection() {
       const s = state.edit.stamp;
       $("#stampOn").checked = s.enabled;
       $$(".pos-grid button").forEach((b) => b.classList.toggle("on", b.dataset.p === s.position));
-      $$(".swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === s.color));
+      $$("[data-sec=stamp] .swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === s.color));
       $("#stampColor").value = s.color;
       const img = $("#stampImg");
       const src = `/api/stamp?v=${state.stampVersion}`;
@@ -440,6 +461,9 @@ function buildVideoSection() {
   const mu = el(`<label class="chk"><input type="checkbox" id="muteChk"> Remove audio</label>`);
   $("input", mu).onchange = (e) => { state.edit.video.mute = e.target.checked; editChanged(); };
   vs.append(mu);
+  vs.append(slider("video.stabilize", "Stabilise", 0, 100));
+  vs.append(slider("video.denoise", "Noise reduction", 0, 100));
+  vs.append(el(`<p class="hint">Stabilise and noise reduction show in “With edits” playback and the export, not in the still preview.</p>`));
   vs.append(el(`<p class="hint">Tip: slow-mo works best on 60/120 fps footage – export at 25 or 30 fps for smooth motion.</p>`));
   controls.push({
     sync() {
@@ -688,6 +712,27 @@ function initTimeline() {
   $("#clearTrimBtn").onclick = () => { state.edit.video.trim_start = 0; state.edit.video.trim_end = null; editChanged(); updateTimeline(); };
   $("#grabBtn").onclick = grabFrame;
   initPlayer();
+}
+
+// ---------------------------------------------------------------------------
+// automatic adjustments
+// ---------------------------------------------------------------------------
+async function runAuto({ horizon, exposure }) {
+  if (!state.current) return;
+  const item = state.current;
+  $("#spinner").hidden = false;
+  try {
+    const r = await api("POST", `/api/media/${item.id}/auto`, { edit: state.edit, horizon, exposure, t: state.t });
+    if (state.current !== item) return;
+    const msgs = [];
+    if (horizon) {
+      if (r.horizon_found) { state.edit.straighten = r.straighten; msgs.push(`horizon levelled (${r.straighten}°)`); }
+      else msgs.push(r.top_down ? "camera pointing down – no horizon to level" : "no clear horizon found");
+    }
+    if (exposure) { state.edit.grade.exposure = r.exposure; msgs.push(`exposure ${r.exposure > 0 ? "+" : ""}${r.exposure.toFixed(2)} EV`); }
+    editChanged();
+    toast("Auto: " + msgs.join(", "));
+  } catch (e) { toast(e.message, "error"); } finally { $("#spinner").hidden = true; }
 }
 
 // ---------------------------------------------------------------------------
@@ -1153,6 +1198,11 @@ function openExport() {
   setSizeSelect("#exVSize", o.video_size);
   $("#exFps").value = String(o.video_fps === "source" ? "source" : Math.round(o.video_fps));
   $("#exMeta").checked = o.keep_metadata;
+  const g = state.cfg.gpu;
+  $("#exGpuRow").hidden = !g.available;
+  $("#exGpu").checked = o.use_gpu;
+  $("#exGpuName").textContent = g.name || "NVIDIA";
+  renderQuick();
   $("#exGps").checked = o.strip_gps;
   $("#exOverwrite").checked = o.overwrite;
   $("#exName").value = o.name_pattern;
@@ -1161,6 +1211,39 @@ function openExport() {
   setScope(state.selected.size > 1 ? "selected" : "current");
   updateExportHints();
   $("#exportDlg").showModal();
+}
+
+function exportIds() {
+  return exportScope === "current" ? [state.current?.id].filter(Boolean)
+    : exportScope === "selected" ? [...state.selected] : state.items.map((i) => i.id);
+}
+
+function renderQuick() {
+  const row = $("#quickRow");
+  row.innerHTML = "";
+  const icons = { instagram: "📱", carousel: "🖼", appletv: "📺", full: "⬛" };
+  for (const [key, r] of Object.entries(state.cfg.recipes)) {
+    if (key === "carousel") continue; // "Instagram post" turns panoramas into carousels itself
+    const b = el(`<button type="button" class="btn"><span>${icons[key] || ""} ${escapeHtml(r.label)}</span><small>${escapeHtml(r.help)}</small></button>`);
+    b.onclick = () => quickExport(key);
+    row.append(b);
+  }
+}
+
+async function quickExport(recipe) {
+  const ids = exportIds();
+  if (!ids.length) return toast("Nothing to export", "error");
+  await saveEdit.flush();
+  try {
+    const res = await api("POST", "/api/quick-export", { recipe, media_ids: ids, root: $("#exRoot").value, folder: $("#exFolder").value.trim() });
+    if (res.skipped.length) toast(`Skipped ${res.skipped.length} item(s) that don't suit “${state.cfg.recipes[recipe].label}”`);
+    if (!res.jobs.length) return;
+    $("#exportDlg").close();
+    toast(`${state.cfg.recipes[recipe].label}: exporting ${res.jobs.length} item(s) to ${res.destination}`);
+    $("#jobsDrawer").hidden = false;
+    pollJobs(true);
+    if (state.current) { state.edit = await api("GET", `/api/media/${state.current.id}/edit`); syncControls(); requestPreview(); }
+  } catch (e) { toast(e.message, "error"); }
 }
 
 function setScope(s) {
@@ -1230,7 +1313,7 @@ function exportOptions() {
     photo_size: sizeValue("#exPhotoSize"), video_codec: $("#exCodec").value,
     video_quality: $("#exVQual").value, video_size: sizeValue("#exVSize"), video_fps: $("#exFps").value,
     keep_metadata: $("#exMeta").checked, strip_gps: $("#exGps").checked,
-    overwrite: $("#exOverwrite").checked, name_pattern: $("#exName").value,
+    overwrite: $("#exOverwrite").checked, name_pattern: $("#exName").value, use_gpu: $("#exGpu").checked,
   };
 }
 
@@ -1246,8 +1329,7 @@ function initExport() {
     if (pick) { $("#exRoot").value = pick.root; $("#exFolder").value = pick.path; updateExportHints(); }
   };
   $("#exStart").onclick = async () => {
-    const ids = exportScope === "current" ? [state.current?.id].filter(Boolean)
-      : exportScope === "selected" ? [...state.selected] : state.items.map((i) => i.id);
+    const ids = exportIds();
     if (!ids.length) return toast("Nothing to export", "error");
     await saveEdit.flush();
     try {
@@ -1284,7 +1366,7 @@ function renderJobs() {
   for (const j of [...state.jobs].reverse()) {
     const pct = Math.round(j.progress * 100);
     const st = { queued: "Waiting", running: `${pct}%`, done: "Done", error: "Failed", cancelled: "Cancelled" }[j.status];
-    const li = el(`<li><div class="top"><span class="name">${j.kind === "frame" ? "🖼 frame · " : ""}${escapeHtml(j.name)}</span>
+    const li = el(`<li><div class="top"><span class="name">${({ frame: "🖼 frame · ", carousel: "🖼 carousel · ", hdr: "◐ ", hyperlapse: "⏩ " })[j.kind] || ""}${escapeHtml(j.name)}</span>
         <span class="st ${j.status}">${st}${(j.status === "queued" || j.status === "running") ? ` <button class="link" data-cancel="${j.id}">cancel</button>` : ""}</span></div>
         ${j.status === "running" ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
         ${j.output ? `<div class="out">${escapeHtml(j.output)}</div>` : ""}
@@ -1292,7 +1374,10 @@ function renderJobs() {
     list.append(li);
     if (j.status === "done" && !seenDone.has(j.id)) {
       seenDone.add(j.id);
-      if (Date.now() / 1000 - j.finished < 10) toast(`Saved ${j.output.split(/[\\/]/).pop()}`);
+      if (Date.now() / 1000 - j.finished < 10) {
+        toast(j.kind === "hdr" ? j.output : `Saved ${j.output.split(/[\\/]/).pop()}`);
+        if (j.kind === "hdr") loadLibrary();
+      }
     }
     if (j.status === "error" && !seenDone.has(j.id)) { seenDone.add(j.id); toast(`Export failed: ${j.name}`, "error"); }
   }
@@ -1366,10 +1451,124 @@ async function init() {
   buildPanel();
   renderPresetGrid();
   initLibrary(); initDrop(); initBrowser(); initExport(); initJobs(); initViewer(); initCropDrag(); initTimeline();
+  initAutomation(); initBatchTools(); showGpu();
   const unavailable = state.cfg.output_roots.filter((r) => !r.available);
   if (unavailable.length) toast(`Export folder “${unavailable[0].name}” is not reachable – is the NAS mounted?`, "error");
   await loadLibrary();
   pollJobs();
+}
+
+// ---------------------------------------------------------------------------
+// GPU, automation (watch folder), HDR merge, hyperlapse
+// ---------------------------------------------------------------------------
+function showGpu() {
+  const g = state.cfg.gpu, b = $("#gpuBadge");
+  b.hidden = false;
+  b.classList.toggle("on", g.available);
+  b.textContent = g.available ? `GPU: ${g.name}` : "CPU encoding";
+  b.title = g.available
+    ? `Video decoding${g.decode ? "" : " (CPU)"} and H.264/HEVC encoding run on the ${g.name}. Colour grading filters run on the CPU.`
+    : `No usable NVIDIA GPU: ${g.reason}`;
+}
+
+let watchTimer = null, libCount = 0;
+function fillRoots(sel, roots, value) {
+  sel.innerHTML = roots.map((r) => `<option value="${escapeHtml(r.name)}">${escapeHtml(r.name)}${r.available ? "" : " (not connected)"}</option>`).join("");
+  if (value) sel.value = value;
+}
+
+async function openAutomation() {
+  const { settings: w, status } = await api("GET", "/api/watch");
+  if (!state.cfg.input_roots.length) toast("No NAS import folders are set up yet – see README (SIRIS_INPUT_ROOTS).", "error");
+  fillRoots($("#wRoot"), state.cfg.input_roots, w.root);
+  fillRoots($("#wOutRoot"), state.cfg.output_roots, w.out_root || state.cfg.settings.export.root);
+  $("#wEnabled").checked = w.enabled; $("#wFolder").value = w.folder; $("#wOutFolder").value = w.out_folder;
+  $("#wPhotos").value = w.photos; $("#wVideos").value = w.videos;
+  $("#wLevel").checked = w.auto_level; $("#wExposure").checked = w.auto_exposure;
+  $("#wRecursive").checked = w.recursive; $("#wExisting").checked = w.process_existing;
+  renderWatchLog(status);
+  $("#autoDlg").showModal();
+}
+
+function renderWatchLog(status) {
+  const log = $("#wLog");
+  const when = (t) => new Date(t * 1000).toLocaleTimeString();
+  const rows = [
+    ...status.errors.map((e) => `<li><span class="err">${when(e.at)} · ${escapeHtml(e.message)}</span></li>`),
+    ...status.recent.map((r) => `<li><div class="top"><span class="name">${escapeHtml(r.name)}</span><span class="st ${r.error ? "error" : "done"}">${escapeHtml(r.error ? "failed" : (r.action || ""))}</span></div>${r.error ? `<div class="err">${escapeHtml(r.error)}</div>` : ""}</li>`),
+  ];
+  log.innerHTML = rows.length ? rows.join("") : `<li class="empty">${status.last_scan ? `Last checked ${when(status.last_scan)} – nothing new` : "Not running yet"}${status.waiting ? ` · ${status.waiting} file(s) still copying` : ""}</li>`;
+  $("#autoDot").hidden = !state.cfg.settings.watch?.enabled;
+}
+
+function initAutomation() {
+  $("#autoDot").hidden = !state.cfg.settings.watch?.enabled;
+  $("#autoBtn").onclick = openAutomation;
+  $("#wSave").onclick = async () => {
+    try {
+      const r = await api("PUT", "/api/watch", {
+        enabled: $("#wEnabled").checked, root: $("#wRoot").value, folder: $("#wFolder").value.trim(),
+        out_root: $("#wOutRoot").value, out_folder: $("#wOutFolder").value.trim(),
+        photos: $("#wPhotos").value, videos: $("#wVideos").value, auto_level: $("#wLevel").checked,
+        auto_exposure: $("#wExposure").checked, recursive: $("#wRecursive").checked,
+        process_existing: $("#wExisting").checked,
+      });
+      state.cfg.settings.watch = r.settings;
+      renderWatchLog(r.status);
+      toast(r.settings.enabled ? `Watching for new files${r.skipped_existing ? ` (${r.skipped_existing} existing file(s) left alone)` : ""}` : "Watch folder turned off");
+    } catch (e) { toast(e.message, "error"); }
+  };
+  $("#wScan").onclick = async () => {
+    await api("POST", "/api/watch/scan");
+    setTimeout(async () => renderWatchLog((await api("GET", "/api/watch")).status), 1500);
+  };
+  // Pick up items the watch folder adds while the page is open.
+  libCount = state.items.length;
+  watchTimer = setInterval(async () => {
+    if (!state.cfg.settings.watch?.enabled) return;
+    try {
+      const items = await api("GET", "/api/media");
+      if (items.length !== libCount) { libCount = items.length; state.items = items; renderLibrary(); pollJobs(true); }
+      if ($("#autoDlg").open) renderWatchLog((await api("GET", "/api/watch")).status);
+    } catch (_) { /* server restarting */ }
+  }, 15000);
+}
+
+function selectedPhotos() {
+  return state.items.filter((i) => state.selected.has(i.id) && i.kind === "photo");
+}
+
+function initBatchTools() {
+  $("#hdrBtn").onclick = async () => {
+    const photos = selectedPhotos();
+    if (photos.length < 2) return toast("Select the 3 or 5 photos of one exposure bracket (AEB)", "error");
+    try {
+      await api("POST", "/api/hdr-merge", { media_ids: photos.map((p) => p.id) });
+      toast(`Merging ${photos.length} brackets – the HDR photo will appear in the library`);
+      $("#jobsDrawer").hidden = false; pollJobs(true);
+    } catch (e) { toast(e.message, "error"); }
+  };
+  $("#hlBtn").onclick = () => {
+    const photos = selectedPhotos();
+    if (photos.length < 4) return toast("Select the photos of a sequence (at least 4)", "error");
+    const lead = state.current && state.selected.has(state.current.id) ? state.current : photos[0];
+    $("#hlInfo").textContent = `${photos.length} photos, in file-name order. Every frame gets the edit of “${lead.name}” (grade, crop, sky); the stamp is added once.`;
+    $("#hlDlg").showModal();
+  };
+  $("#hlStart").onclick = async () => {
+    const photos = selectedPhotos();
+    const lead = state.current && state.selected.has(state.current.id) ? state.current : photos[0];
+    await saveEdit.flush();
+    try {
+      const r = await api("POST", "/api/hyperlapse", {
+        media_ids: photos.map((p) => p.id), edit_from: lead.id, fps: +$("#hlFps").value,
+        recipe: $("#hlRecipe").value, stabilize: $("#hlStab").checked, deflicker: $("#hlFlicker").checked,
+      });
+      $("#hlDlg").close();
+      toast(`Making hyperlapse → ${r.destination}`);
+      $("#jobsDrawer").hidden = false; pollJobs(true);
+    } catch (e) { toast(e.message, "error"); }
+  };
 }
 
 init().catch((e) => toast("Failed to start: " + e.message, "error"));

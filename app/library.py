@@ -129,6 +129,15 @@ class Library:
             shutil.copyfileobj(stream, fh, length=8 * 1024 * 1024)
         return self._register(mid, name, kind, "upload", dest.name, dest, default_edit)
 
+    def add_generated(self, name: str, ext: str, write, default_edit: dict | None = None) -> dict:
+        """Add a file the app made itself (e.g. a merged HDR). `write(path)` creates it."""
+        mid = uuid.uuid4().hex[:12]
+        d = self._item_dir(mid)
+        d.mkdir(parents=True)
+        dest = d / ("original" + ext)
+        write(dest)
+        return self._register(mid, name, media_kind(name) or "photo", "upload", dest.name, dest, default_edit)
+
     def add_linked(self, path: Path, default_edit: dict | None = None) -> dict:
         kind = media_kind(path.name)
         if not kind or not path.is_file():

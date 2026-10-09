@@ -72,7 +72,8 @@ def test_photo_matches_ffmpeg_pipeline(tmp_path):
     mask = load_mask(DEFAULT_STAMP)
     edit = {"rotate": 90, "flip_h": True, "straighten": -6, "crop": {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8},
             "grade": {"contrast": 30, "temperature": 20, "vibrance": 40, "shadow_sat": 30},
-            "vignette": -50, "sharpen": 30, "stamp": {"enabled": True}}
+            "vignette": -50, "sharpen": 30, "stamp": {"enabled": True},
+            "grad": {"strength": 60, "height": 55, "color": "#1e4a8a"}}
     photo = render.render(Image.open(src_png).convert("RGB"), edit, stamp_mask=mask)
     meta = {"width": w, "height": h, "duration": 1, "color_space": None}
     g = video.build_graph(meta, edit, tmp_path, mask, out_pix_fmt="yuv444p10le")

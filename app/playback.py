@@ -87,13 +87,23 @@ class Playback:
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(f".{out.name}.part")
         try:
-            with tempfile.TemporaryDirectory(prefix="siris-play-") as work:
-                g = video.build_graph(item, edit, Path(work), mask, long_edge=PLAYBACK_EDGE,
-                                      out_pix_fmt="yuv420p")
-                cmd = video.export_command(src, item, g, tmp, "h264", "standard",
-                                           keep_metadata=False, fast=True)
-                video.run_ffmpeg(cmd, g["duration"], lambda p: state.__setitem__("progress", p),
-                                 state["cancel"])
+            def attempt(use_gpu: bool) -> None:
+                with tempfile.TemporaryDirectory(prefix="siris-play-") as work:
+                    _, pix, _ = video.encoder_settings("h264", "standard", use_gpu, fast=True)
+                    stab = video.prepare_stabilize(src, item, edit, Path(work), use_gpu, state["cancel"])
+                    g = video.build_graph(item, edit, Path(work), mask, long_edge=PLAYBACK_EDGE,
+                                          out_pix_fmt=pix, stab=stab)
+                    cmd = video.export_command(src, item, g, tmp, "h264", "standard",
+                                               keep_metadata=False, fast=True, use_gpu=use_gpu)
+                    video.run_ffmpeg(cmd, g["duration"], lambda p: state.__setitem__("progress", p),
+                                     state["cancel"])
+
+            try:
+                attempt(True)
+            except video.FFmpegError:
+                if not video.encoder_settings("h264", use_gpu=True)[2]:
+                    raise
+                attempt(False)
             os.replace(tmp, out)
             state["status"], state["progress"] = "ready", 1.0
             self._prune(out.parent)

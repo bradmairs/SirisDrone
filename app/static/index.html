@@ -19,6 +19,8 @@
       Upload
     </label>
     <button class="btn" id="importBtn" title="Add files already on the NAS (no upload needed)">Import from NAS</button>
+    <button class="btn" id="autoBtn" title="Watch a NAS folder and edit/export new drone files automatically">Automation <span class="dot" id="autoDot" hidden></span></button>
+    <span class="gpu-badge" id="gpuBadge" hidden></span>
     <button class="btn ghost" id="jobsBtn">Exports <span class="pill" id="jobsCount" hidden>0</span></button>
     <button class="btn primary" id="exportBtn" disabled>Export…</button>
   </div>
@@ -42,6 +44,8 @@
     <div class="lib-foot" id="libFoot" hidden>
       <span id="selCount">0 selected</span>
       <button class="link" id="syncBtn">Apply settings…</button>
+      <button class="link" id="hdrBtn" title="Merge an exposure bracket (AEB) into one HDR photo">Merge HDR</button>
+      <button class="link" id="hlBtn" title="Make a video from a photo sequence">Hyperlapse…</button>
       <button class="link danger" id="removeBtn">Remove</button>
     </div>
   </aside>
@@ -117,6 +121,11 @@
   <form method="dialog" id="exportForm">
     <h2>Export to NAS</h2>
     <div class="field">
+      <label>One-click export</label>
+      <div class="quick" id="quickRow"></div>
+      <div class="hint" id="quickHint">Uses the destination below. Or set everything yourself further down.</div>
+    </div>
+    <div class="field">
       <label>What</label>
       <div class="seg" id="exportScope">
         <button type="button" data-s="current" class="on">This item</button>
@@ -168,14 +177,15 @@
             <input type="number" min="64" max="16384" placeholder="height" aria-label="Max height"> px
           </div>
           <div class="hint" id="exVideoResult"></div></div>
+        <label class="chk" id="exGpuRow"><input type="checkbox" id="exGpu"> Use GPU (<span id="exGpuName"></span>)</label>
         <div class="field"><label>Frame rate</label>
-          <select id="exFps"><option value="source">Same as source</option><option value="24">24</option><option value="25">25</option><option value="30">30</option><option value="50">50</option><option value="60">60</option></select></div>
+          <select id="exFps"><option value="source">Same as source</option><option value="max60">Same as source, max 60 (Apple TV)</option><option value="24">24</option><option value="25">25</option><option value="30">30</option><option value="50">50</option><option value="60">60</option></select></div>
       </fieldset>
     </div>
     <div class="field">
       <label>File name</label>
       <input id="exName" placeholder="{name}_BRM" style="width:100%">
-      <div class="hint">Use <code>{name}</code> original name, <code>{date}</code> date taken, <code>{n}</code> number in this batch.
+      <div class="hint">Use <code>{name}</code> original name, <code>{date}</code> date taken, <code>{place}</code> where it was shot (from GPS), <code>{n}</code> number in this batch.
         Example: <b id="exNameExample"></b></div>
     </div>
     <div class="field row wrap">
@@ -186,6 +196,59 @@
     <div class="dlg-actions">
       <button value="cancel" class="btn ghost">Cancel</button>
       <button type="button" class="btn primary" id="exStart">Start export</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Automation (watch folder) -->
+<dialog id="autoDlg" class="dlg">
+  <form method="dialog">
+    <h2>Automation – watch folder</h2>
+    <p class="hint">Copy drone files into this NAS folder and they're edited (BRM Blue, stamp, level horizon,
+      exposure) and exported automatically. Originals are never changed. Each file also appears in the library so you can tweak and re-export it.</p>
+    <label class="chk"><input type="checkbox" id="wEnabled"> <b>Watch for new files</b></label>
+    <div class="field"><label>Watch this NAS folder</label>
+      <div class="row"><select id="wRoot"></select><input id="wFolder" placeholder="sub-folder, e.g. Inbox"></div></div>
+    <div class="cols">
+      <div class="field"><label>Photos</label>
+        <select id="wPhotos"><option value="instagram">Instagram post (4:5, 1080 × 1350; panoramas → carousel)</option>
+          <option value="full">Full resolution JPEG</option><option value="skip">Edit only, don't export</option></select></div>
+      <div class="field"><label>Videos</label>
+        <select id="wVideos"><option value="appletv">Apple TV 4K (HEVC 10-bit, source fps up to 60)</option>
+          <option value="full">Full resolution HEVC</option><option value="skip">Edit only, don't export</option></select></div>
+    </div>
+    <div class="field"><label>Export to</label>
+      <div class="row"><select id="wOutRoot"></select><input id="wOutFolder" placeholder="sub-folder, e.g. Auto exports"></div></div>
+    <div class="field row wrap">
+      <label class="chk"><input type="checkbox" id="wLevel"> Level the horizon</label>
+      <label class="chk"><input type="checkbox" id="wExposure"> Auto exposure</label>
+      <label class="chk"><input type="checkbox" id="wRecursive"> Include sub-folders</label>
+      <label class="chk"><input type="checkbox" id="wExisting"> Also process files already in the folder</label>
+    </div>
+    <p class="hint">10-bit Mini 3 Pro videos are treated as D-Cinelike and get the “D-Cinelike → BRM Blue” look.</p>
+    <div class="field"><label>Activity</label><ul class="jobs auto-log" id="wLog"></ul></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" id="wScan">Check now</button>
+      <button value="cancel" class="btn ghost">Close</button>
+      <button type="button" class="btn primary" id="wSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Hyperlapse -->
+<dialog id="hlDlg" class="dlg small">
+  <form method="dialog">
+    <h2>Hyperlapse from photos</h2>
+    <p class="hint" id="hlInfo"></p>
+    <div class="field"><label>Frames per second</label>
+      <select id="hlFps"><option>10</option><option>15</option><option>24</option><option selected>25</option><option>30</option></select></div>
+    <div class="field"><label>Output</label>
+      <select id="hlRecipe"><option value="appletv">Apple TV 4K (3840 × 2160 HEVC)</option><option value="full">Full resolution HEVC</option></select></div>
+    <label class="chk"><input type="checkbox" id="hlStab" checked> Stabilise</label>
+    <label class="chk"><input type="checkbox" id="hlFlicker" checked> Remove flicker</label>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button type="button" class="btn primary" id="hlStart">Make video</button>
     </div>
   </form>
 </dialog>

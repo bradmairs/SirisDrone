@@ -205,3 +205,43 @@ def test_video_playback_original_and_edited(client, env, tmp_path):
     # photos can't be played
     p = upload(client, make_photo(tmp_path / "p.jpg", 300, 200))
     assert client.post(f"/api/media/{p['id']}/playback", json={"mode": "original"}).status_code == 400
+
+
+def test_gpu_falls_back_to_cpu_and_new_video_filters(client, env, tmp_path):
+    """Pretend an NVIDIA GPU exists: NVENC/CUDA fail in this sandbox, so the job must redo it on the CPU."""
+    from app import gpu, video
+    _, out, raw = env
+    make_video(raw / "clip.mp4", seconds=2)
+    item = client.post("/api/media/import", json={"root": "Footage", "path": ""}).json()["added"][0]
+    edit = client.get(f"/api/media/{item['id']}/edit").json()
+    edit["video"].update({"stabilize": 60, "denoise": 50})
+    edit["grad"] = {"strength": 50, "height": 60, "color": "#1e4a8a"}
+    client.put(f"/api/media/{item['id']}/edit", json=edit)
+
+    gpu.set_status_for_tests({"available": True, "h264": True, "hevc": True, "decode": True,
+                              "name": "RTX 3060", "reason": ""})
+    try:
+        args, pix, on_gpu = video.encoder_settings("h265", "max", use_gpu=True)
+        assert on_gpu and "hevc_nvenc" in args and pix == "p010le" and "hvc1" in args
+        assert "h264_nvenc" in video.encoder_settings("h264", use_gpu=True)[0]
+        assert video.encoder_settings("h264", use_gpu=False)[2] is False
+        assert video.encoder_settings("prores", use_gpu=True)[2] is False
+        assert gpu.decode_args(True) == ["-hwaccel", "cuda"]
+        client.post("/api/export", json={"media_ids": [item["id"]],
+                                         "options": {"root": "NAS", "video_codec": "h265", "video_fps": "max60"}})
+        client.app_state.jobs.wait_idle(180)
+    finally:
+        gpu.set_status_for_tests(None)
+    job = client.get("/api/jobs").json()[-1]
+    assert job["status"] == "done", job
+    info = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams",
+                                      job["output"]], capture_output=True, text=True).stdout)["streams"][0]
+    assert info["codec_name"] == "hevc" and info["pix_fmt"] == "yuv420p10le"
+
+
+def test_fps_cap_for_apple_tv():
+    from app.jobs import output_fps
+    assert output_fps("max60", {"fps": 119.88}) == 60.0
+    assert output_fps("max60", {"fps": 59.94}) is None
+    assert output_fps("source", {"fps": 120}) is None
+    assert output_fps(25.0, {"fps": 60}) == 25.0

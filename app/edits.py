@@ -26,6 +26,8 @@ DEFAULT_EDIT: dict = {
     "grade": normalize_grade(HOUSE_GRADE),  # "BRM Blue"
     "sharpen": 0,     # 0..100
     "vignette": 0,    # -100..100 (negative darkens edges)
+    # Graduated "sky" filter: darkens/tints the top of the frame, fading out by `height` %.
+    "grad": {"strength": 0, "height": 50, "color": "#000000"},
     "stamp": {
         "enabled": True,
         "position": "br",
@@ -41,6 +43,8 @@ DEFAULT_EDIT: dict = {
         "trim_end": None,  # None = end of clip
         "speed": 1.0,
         "mute": False,
+        "stabilize": 0,   # 0..100 (vidstab smoothing; applied in playback & export)
+        "denoise": 0,     # 0..100 (hqdn3d)
     },
 }
 
@@ -72,6 +76,11 @@ def normalize_edit(edit: dict | None) -> dict:
     e["grade"] = normalize_grade(edit["grade"]) if "grade" in edit else e["grade"]
     e["sharpen"] = _num(edit.get("sharpen", 0), 0, 100, 0)
     e["vignette"] = _num(edit.get("vignette", 0), -100, 100, 0)
+    gr = {**DEFAULT_EDIT["grad"], **(edit.get("grad") or {})}
+    gcol = str(gr.get("color") or "#000000")
+    e["grad"] = {"strength": _num(gr.get("strength"), 0, 100, 0),
+                 "height": _num(gr.get("height"), 5, 100, 50),
+                 "color": gcol if len(gcol) == 7 and gcol.startswith("#") else "#000000"}
 
     s = {**DEFAULT_EDIT["stamp"], **(edit.get("stamp") or {})}
     pos = s.get("position")
@@ -99,6 +108,8 @@ def normalize_edit(edit: dict | None) -> dict:
         "trim_end": end,
         "speed": _num(v.get("speed"), 0.25, 4, 1.0),
         "mute": bool(v.get("mute")),
+        "stabilize": _num(v.get("stabilize"), 0, 100, 0),
+        "denoise": _num(v.get("denoise"), 0, 100, 0),
     }
     return e
 

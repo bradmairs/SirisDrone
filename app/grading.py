@@ -72,9 +72,13 @@ PRESETS: dict[str, dict] = {
                  "contrast": 14, "highlights": -30, "shadows": 15, "tint": -4},
     "Black & White": {"saturation": -100, "contrast": 30, "highlights": -20, "shadows": 15,
                       "blacks": -10},
-    "D-Log M → Rec.709 (quick)": {"contrast": 55, "saturation": 35, "vibrance": 15,
-                                   "blacks": -35, "whites": 25, "highlights": -10,
-                                   "exposure": 0.15},
+    # DJI Mini 3 Pro D-Cinelike (10-bit, flat): restore contrast and colour, then the house blues.
+    "D-Cinelike → BRM Blue": {"contrast": 48, "saturation": 32, "vibrance": 45, "blacks": -22,
+                              "whites": 14, "highlights": -18, "exposure": 0.1,
+                              "temperature": -14, "tint": 6, "dehaze": 15,
+                              "blue_sat": 50, "blue_lum": 10},
+    "D-Cinelike → Natural": {"contrast": 42, "saturation": 25, "vibrance": 20, "blacks": -20,
+                             "whites": 12, "highlights": -10, "exposure": 0.1},
 }
 
 
