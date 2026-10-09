@@ -1,5 +1,9 @@
-# Run on the NAS itself (Synology Container Manager, QNAP Container Station, Unraid, TrueNAS…)
-# or on any PC that has the NAS share mounted.  Edit the left-hand side of each volume.
+# Run on your server/NAS (Unraid, TrueNAS SCALE, Ubuntu, Synology…) or any PC with the NAS
+# share mounted. Edit the left-hand side of each volume.
+#
+# NVIDIA GPU (e.g. RTX 3060): install the NVIDIA driver + NVIDIA Container Toolkit on the host
+# (Unraid: the "Nvidia Driver" plugin). The app checks the GPU at start-up; the top bar shows
+# "GPU: NVIDIA GeForce RTX 3060" when it is being used. No GPU? Delete the `deploy:` block.
 services:
   sirisdrone:
     build: .
@@ -16,10 +20,22 @@ services:
       SIRIS_OUTPUT_ROOTS: "NAS=/nas/exports"
       # Optional: folders whose footage you can import without uploading.
       SIRIS_INPUT_ROOTS: "Drone footage=/nas/footage"
-      # Optional: password-protect the web UI.
+      # GPU video decode/encode needs the "video" capability (NVENC/NVDEC libraries).
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+      # Place names for {place} come from OpenStreetMap; set to "off" to disable lookups.
+      # SIRIS_GEOCODER: "off"
+      # Optional: password-protect the web UI (do this if it's reachable outside your home).
       # SIRIS_USER: admin
       # SIRIS_PASSWORD: change-me
     volumes:
       - ./data:/data                                 # library, edits, LUTs, settings
       - /volume1/Drone/Exports:/nas/exports          # <- your NAS export folder
-      - /volume1/Drone/Footage:/nas/footage:ro       # <- your raw drone footage (read-only)
+      - /volume1/Drone/Footage:/nas/footage:ro       # <- your raw drone footage, incl. the watch "Inbox" (read-only is fine)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

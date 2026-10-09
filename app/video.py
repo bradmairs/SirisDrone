@@ -17,9 +17,9 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import grading
+from . import gpu, grading
 from .edits import normalize_edit, plan_geometry
-from .render import SHARPEN_MAX, SHARPEN_SIZE, vignette_overlay
+from .render import SHARPEN_MAX, SHARPEN_SIZE, grad_overlay, vignette_overlay
 from .stamp import render_stamp
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts", ".m2ts"}
@@ -80,6 +80,8 @@ def probe(path: Path) -> dict:
         "color_space": v.get("color_space"), "color_range": v.get("color_range"),
         "color_transfer": v.get("color_transfer"),
         "creation_time": (data.get("format", {}).get("tags") or {}).get("creation_time"),
+        "location": next((t[k] for t in ((data.get("format", {}).get("tags") or {}), (v.get("tags") or {}))
+                          for k in ("location", "com.apple.quicktime.location.ISO6709") if t.get(k)), None),
     }
 
 
@@ -112,6 +114,12 @@ def extract_frame(path: Path, meta: dict, t: float, long_edge: int | None = None
     return np.frombuffer(res.stdout[:need], dtype=dtype).reshape(h, w, 3)
 
 
+def browser_playable(path: Path, meta: dict) -> bool:
+    """8-bit H.264 in MP4/MOV plays in every browser; HEVC/10-bit/ProRes does not reliably."""
+    return (meta.get("codec") == "h264" and meta.get("pix_fmt") in ("yuv420p", "yuvj420p")
+            and path.suffix.lower() in (".mp4", ".mov", ".m4v"))
+
+
 def _atempo(speed: float) -> str:
     parts = []
     while speed < 0.5:
@@ -130,16 +138,49 @@ def _esc(path: Path) -> str:
     return s.replace(":", r"\:").replace("'", r"\'").replace(",", r"\,")
 
 
+def _trim(meta: dict, v: dict) -> tuple[float, float]:
+    start = v["trim_start"]
+    end = v["trim_end"] if v["trim_end"] is not None else meta["duration"]
+    end = min(end, meta["duration"]) if meta["duration"] else end
+    return start, max(0.04, end - start)
+
+
+def prepare_stabilize(src: Path, meta: dict, edit: dict, workdir: Path, use_gpu: bool = False,
+                      cancel: threading.Event | None = None) -> Path | None:
+    """Pass 1 of stabilisation: analyse camera shake over the trimmed clip (vidstabdetect)."""
+    edit = normalize_edit(edit)
+    amount = edit["video"]["stabilize"]
+    if not amount:
+        return None
+    start, dur = _trim(meta, edit["video"])
+    trf = workdir / "shake.trf"
+    shakiness = max(1, min(10, round(3 + amount / 15)))
+    cmd = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", *gpu.decode_args(use_gpu),
+           "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src), "-an", "-sn",
+           "-vf", f"vidstabdetect=shakiness={shakiness}:accuracy=15:result='{_esc(trf)}'",
+           "-progress", "pipe:1", "-nostats", "-f", "null", "-"]
+    run_ffmpeg(cmd, dur, None, cancel)
+    return trf
+
+
 def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image | None,
-                long_edge: int | None = None, fps: float | None = None,
-                out_pix_fmt: str = "yuv420p", allow_upscale: bool = False) -> dict:
-    """Return the FFmpeg input args / filter graph for an edit (without encoder settings)."""
+                long_edge: int | tuple | None = None, fps: float | None = None,
+                out_pix_fmt: str = "yuv420p", allow_upscale: bool = False,
+                stab: Path | None = None) -> dict:
+    """Return the FFmpeg input args / filter graph for an edit (without encoder settings).
+
+    `stab` is the shake analysis from prepare_stabilize(), when stabilising."""
     edit = normalize_edit(edit)
     geo = plan_geometry(meta["width"], meta["height"], edit)
     out_w, out_h = geo.output_size(long_edge, even=True, allow_upscale=allow_upscale)
     v = edit["video"]
     inputs: list[str] = []
     chain: list[str] = []
+
+    # 0. stabilise first, on the frames exactly as decoded (matches the analysis pass)
+    if stab is not None and v["stabilize"]:
+        smoothing = round((5 + v["stabilize"] / 100 * 35) * max(meta.get("fps") or 30, 1) / 30)
+        chain.append(f"vidstabtransform=input='{_esc(stab)}':smoothing={smoothing}:optzoom=1:interpol=bicubic")
 
     speed = v["speed"]
     if speed != 1:
@@ -169,8 +210,14 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
     cy = int(round(offy + geo.cy)) // 2 * 2
     if (cw, ch) != (geo.ow, geo.oh) or cx or cy:
         chain.append(f"crop={cw}:{ch}:{cx}:{cy}")
-    # 4. resize + convert to RGB using the source's real colour matrix
-    chain.append(f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd+full_chroma_int:{_input_conv(meta)}")
+    # 4. resize (+ denoise at output size) and convert to RGB using the source's colour matrix
+    if v["denoise"]:
+        d = v["denoise"] / 100 * 1.5
+        chain.append(f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd+full_chroma_int")
+        chain.append(f"hqdn3d={4 * d:.2f}:{3 * d:.2f}:{6 * d:.2f}:{4.5 * d:.2f}")
+        chain.append(f"scale=flags=accurate_rnd+full_chroma_int:{_input_conv(meta)}")
+    else:
+        chain.append(f"scale={out_w}:{out_h}:flags=lanczos+accurate_rnd+full_chroma_int:{_input_conv(meta)}")
     chain.append("format=gbrp16le")
     # 5. colour grade
     if not grading.is_neutral(edit["grade"]):
@@ -193,7 +240,9 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
         last = f"{name}o"
         n_in += 1
 
-    # 6. vignette, 7. sharpen, 8. stamp
+    # 6. sky filter + vignette, 7. sharpen, 8. stamp
+    if edit["grad"]["strength"]:
+        overlay(grad_overlay(out_w, out_h, edit["grad"]), "grad", 0, 0)
     if edit["vignette"]:
         overlay(vignette_overlay(out_w, out_h, edit["vignette"]), "vig", 0, 0)
     if edit["sharpen"]:
@@ -205,10 +254,7 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
         overlay(img, "stamp", x, y)
     graph.append(f"[{last}]format={out_pix_fmt}[vout]")
 
-    start = v["trim_start"]
-    end = v["trim_end"] if v["trim_end"] is not None else meta["duration"]
-    end = min(end, meta["duration"]) if meta["duration"] else end
-    src_dur = max(0.04, end - start)
+    start, src_dur = _trim(meta, v)
     return {
         "inputs": inputs, "filter": ";".join(graph), "width": out_w, "height": out_h,
         "start": start, "src_duration": src_dur, "duration": src_dur / speed,
@@ -216,21 +262,43 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
     }
 
 
-def export_command(src: Path, meta: dict, g: dict, out_path: Path, codec: str = "h264",
-                   quality: str = "high", keep_metadata: bool = True) -> list[str]:
+def encoder_settings(codec: str, quality: str = "high", use_gpu: bool = False,
+                     fast: bool = False) -> tuple[list[str], str, bool]:
+    """(encoder args, pixel format the filter graph must end in, uses GPU)."""
+    nv = gpu.encoder(codec, quality, use_gpu)
+    if nv:
+        args, pix, _ = nv
+        if fast:
+            args = [a if a != "p6" else "p2" for a in args]
+        return args, pix, True
     label, ext, vargs, pix = CODECS[codec]
+    if fast and codec == "h264":
+        vargs = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high"]
+    if codec in QUALITY_CRF:
+        vargs = [*vargs, "-crf", str(QUALITY_CRF[codec].get(quality, QUALITY_CRF[codec]["high"]))]
+    return vargs, pix, False
+
+
+def export_command(src: Path, meta: dict, g: dict, out_path: Path, codec: str = "h264",
+                   quality: str = "high", keep_metadata: bool = True,
+                   fast: bool = False, use_gpu: bool = False) -> list[str]:
+    """`fast` trades size/quality for speed (used for in-app playback previews).
+
+    The graph `g` must have been built with the pixel format encoder_settings() returns."""
+    ext = CODECS[codec][1]
+    vargs, _, on_gpu = encoder_settings(codec, quality, use_gpu, fast)
     cmd = [FFMPEG, "-hide_banner", "-y", "-nostdin", "-loglevel", "error",
+           *gpu.decode_args(on_gpu),
            "-ss", f"{g['start']:.3f}", "-t", f"{g['src_duration']:.3f}", "-i", str(src),
            *g["inputs"], "-filter_complex", g["filter"], "-map", "[vout]", *vargs]
-    if codec in QUALITY_CRF:
-        cmd += ["-crf", str(QUALITY_CRF[codec].get(quality, QUALITY_CRF[codec]["high"]))]
     cmd += ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
             "-color_range", "tv"]
     if meta.get("has_audio") and not g["mute"]:
         cmd += ["-map", "0:a:0?"]
         if g["speed"] != 1:
             cmd += ["-af", _atempo(g["speed"])]
-        cmd += ["-c:a", "pcm_s16le"] if codec == "prores" else ["-c:a", "aac", "-b:a", "320k"]
+        cmd += (["-c:a", "pcm_s16le"] if codec == "prores"
+                else ["-c:a", "aac", "-b:a", "128k" if fast else "320k"])
     cmd += ["-map_metadata", "0" if keep_metadata else "-1", "-map_chapters", "-1"]
     if ext == ".mp4":
         cmd += ["-movflags", "+faststart"]

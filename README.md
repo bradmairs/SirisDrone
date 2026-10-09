@@ -5,30 +5,44 @@ grade and stamp each shot with the **BRM Highlife** logo, then export at full
 resolution straight to a folder on your NAS.
 
 It runs in a browser on your computer, tablet or phone. The processing happens
-on the machine running the app, ideally the NAS itself.
+on the machine running the app, ideally your server, using its **NVIDIA GPU**
+(e.g. RTX 3060) for video. It's tuned for the **DJI Mini 3 Pro**.
+
+**The fast path:** turn on **Automation**, then copy a flight's files into the NAS
+"Inbox" folder. Photos come out as finished Instagram posts (4:5, 1080 × 1350,
+BRM Blue, stamp, level horizon), and panoramas as swipeable carousels. Videos come
+out as full-quality 4K HEVC files with BRM Blue and the stamp, ready for your
+Apple TV 4K screensaver.
 
 ## Features
 
 | | |
 |---|---|
 | **Upload / import** | Drag & drop photos and videos, or *Import from NAS* to edit footage already on the NAS without uploading it again. Supports JPEG, DNG (RAW), PNG, TIFF, MP4, MOV and MKV, including 4K 10-bit H.265. |
+| **Automation (watch folder)** | Watches a NAS folder. Each new photo or video is added to the library, auto-edited (BRM Blue, stamp, level horizon, exposure; the D-Cinelike look for 10-bit Mini 3 Pro clips) and exported. Photos go out as Instagram posts and panoramas as carousels; videos as Apple TV 4K. Files that are still copying are left until they finish, originals are never changed, and you can tweak and re-export anything later. |
+| **One-click exports** | **Instagram post** (4:5 crop, 1080 × 1350 JPEG, GPS removed; panoramas become a **carousel** of seamless 1080 × 1350 slides with the stamp on the last one), **Apple TV 4K** (3840 × 2160 HEVC 10-bit, maximum quality, source frame rate up to 60 fps, `hvc1`-tagged for Apple devices) and **Full resolution**. |
+| **NVIDIA GPU** | Video is decoded (NVDEC) and encoded (NVENC H.264 / HEVC 10-bit) on the GPU, including exports, playback previews and hyperlapses. The top bar shows which GPU is in use. If the GPU is missing or busy, the job is redone on the CPU automatically. The colour-grading and stamp filters always run on the CPU, because FFmpeg has no GPU version of them. |
+| **Auto fix** | **Auto-level horizon** finds the horizon and straightens it (and leaves straight-down shots alone). **Auto exposure** brightens or darkens mid-tones without clipping the sky. |
 | **Crop & rotate** | Drag-to-crop with a rule-of-thirds grid. Aspect presets: 16:9, 9:16 (Reels/TikTok), 4:5 (Instagram), 1:1, 4:3, 3:2, 2.39:1, 21:9, original, free. Rotate 90°, flip, and **straighten** (horizon levelling) with automatic zoom so no empty corners show. |
 | **Colour grade** | Every new upload starts with **BRM Blue**, the BRM Highlife house look: deep, clear sky and ocean blues, while greens, sand and rock stay natural. On top of that you get exposure, contrast, highlights, shadows, whites, blacks, **dehaze** (cuts through aerial haze), fade, temperature, tint, vibrance, saturation, split toning, and **Blues** saturation/brightness controls that only affect sky and water. |
-| **Presets** | BRM Blue, Natural, Vivid Aerial, Clear Skies, Golden Hour, Teal & Orange, Moody, Cinematic Fade, Tropical, Black & White, D-Log M quick fix. Each one shows a live thumbnail of your shot. Save your own looks, and use *Set as default* to change what new uploads start with. |
-| **LUTs** | Upload `.cube` LUTs, e.g. DJI's official D-Log M → Rec.709 LUT, with a strength slider. |
+| **Presets** | BRM Blue, Natural, Vivid Aerial, Clear Skies, Golden Hour, Teal & Orange, Moody, Cinematic Fade, Tropical, Black & White, and for Mini 3 Pro **D-Cinelike → BRM Blue** and **D-Cinelike → Natural**. Each one shows a live thumbnail of your shot. Save your own looks, and use *Set as default* to change what new uploads start with. |
+| **LUTs** | Upload `.cube` LUTs (e.g. a D-Cinelike → Rec.709 LUT) with a strength slider. |
 | **Detail** | Sharpen and vignette. |
-| **BRM Highlife stamp** | On by default and placed like your posts: black script, bottom-right, about a quarter of the image's short edge wide, with a small margin. Adjust size, margin, opacity, drop shadow, colour (white / black / gold / any) and position, e.g. switch to white on dark shots. You can swap in another logo (a transparent PNG works best). |
-| **Video** | Scrub through the clip, trim in/out, change speed (0.25×–4× for slow-mo or hyperlapse), remove audio, and save any frame as a full-resolution photo. |
+| **Sky (graduated filter)** | Darkens or deepens the top of the frame (neutral, deep blue, teal or warm) to rescue bright, washed-out skies. |
+| **HDR bracket merge** | Select the 3 or 5 shots of an AEB bracket and choose *Merge HDR*. They're aligned (to remove drone drift) and fused into one 16-bit photo with detail in both sky and shadows, which then appears in the library to edit like any photo. |
+| **Hyperlapse** | Select a photo sequence and choose *Hyperlapse…*. Every frame gets one photo's edit, then flicker is removed, the result is stabilised, the stamp is added once, and it's exported as 4K video. |
+| **BRM Highlife stamp** | On by default and placed like your posts: black script, bottom-right, about a quarter of the image's short edge wide, with a small margin. Adjust size, margin, opacity, drop shadow, colour (white / black / gold / any) and position, e.g. switch to white on dark shots. **Reset stamp to default** puts it back to black, bottom-right, original size in one click. You can swap in another logo (a transparent PNG works best). |
+| **Video** | **Stabilise** (two-pass `vidstab`) and **noise reduction** sliders. **Play clips inside the app**: *Original* plays the clip as shot (H.265 / 10-bit DJI clips get a playable H.264 copy automatically), and *With edits* renders a quick preview with your grade, crop, trim, speed and stamp. You can also scrub, trim in/out, change speed (0.25×–4× for slow-mo or hyperlapse), remove audio, and save any frame as a full-resolution photo. |
 | **Batch** | Copy and paste settings, apply settings to many selected items, set a default look for new uploads, and export many items at once. |
-| **Export** | Full resolution or resized. JPEG (quality slider), 16-bit TIFF or PNG for photos. H.264, H.265 10-bit or ProRes 422 HQ for video. Keeps camera EXIF (with an option to **remove GPS**), never overwrites unless asked, and writes files atomically so a half-finished export never appears on the NAS. |
+| **Export** | Full resolution, a preset size (4K, 2.7K, 1080p, Instagram 1080 × 1350, Reels 1080 × 1920…) or a **custom width × height** box; the crop is fitted inside without stretching, and the dialog shows the exact output size. **File names** follow a pattern such as `{name}_BRM` or `{date} {place} {n}`, where `{place}` is the location the shot was taken (e.g. "Wharariki Beach"), from its GPS. JPEG (quality slider), 16-bit TIFF or PNG for photos. H.264, H.265 10-bit or ProRes 422 HQ for video, with a frame-rate choice. Keeps camera EXIF (with an option to **remove GPS**), never overwrites unless asked, and writes files atomically so a half-finished export never appears on the NAS. |
 | **Live preview** | Before/after comparison (hold **B**) and a histogram. The preview uses exactly the same colour pipeline as the export, so what you see is what you get. |
 
 ## Running it
 
-### Option A – Docker on the NAS (recommended)
+### Option A – Docker on your server (recommended)
 
-This works with Synology Container Manager, QNAP Container Station, Unraid,
-TrueNAS and any other system with Docker.
+This works with Unraid, TrueNAS SCALE, Ubuntu/Debian, Synology Container
+Manager, QNAP Container Station and any other system with Docker.
 
 1. Copy this folder onto the NAS.
 2. Edit `docker-compose.yml` and set the left-hand side of the volume lines to
@@ -42,9 +56,20 @@ TrueNAS and any other system with Docker.
 3. Optional but recommended: uncomment `user: "1026:100"` and set it to your NAS
    account's UID:GID (`id <your-user>` over SSH). Exported files then belong to
    you instead of `root`, so you can rename or delete them from your PC.
-4. Run `docker compose up -d --build`. On Synology you can also create a
-   *Project* in Container Manager from this folder.
-5. Open `http://<nas-ip>:8080` in a browser.
+4. **GPU:** install the NVIDIA driver and the
+   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+   on the host. On Unraid, use the *Nvidia Driver* plugin. The compose file
+   already asks for the GPU (the `deploy:` block) with
+   `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`. The `video` capability is
+   what makes NVENC/NVDEC available inside the container. Without a GPU, delete
+   the `deploy:` block.
+5. Run `docker compose up -d --build`.
+6. Open `http://<server-ip>:8080`. The top bar should say
+   **GPU: NVIDIA GeForce RTX 3060**. If it says *CPU encoding*, hover over it to
+   see why.
+7. To automate: click **Automation**, choose the folder to watch (e.g.
+   `Drone footage` / `Inbox`) and where exports go, tick **Watch for new
+   files**, then **Save**.
 
 ### Option B – on a PC with the NAS share mounted
 
@@ -73,7 +98,9 @@ Then open <http://localhost:8080>.
 | `SIRIS_OUTPUT_ROOTS` | Export destinations, `Name=path;Name2=path2`. The export dialog lets you browse and create sub-folders inside these. | `./data/exports` |
 | `SIRIS_INPUT_ROOTS` | Folders you can *Import from NAS* (read-only is fine). | none |
 | `SIRIS_DATA_DIR` | Library, edits, LUTs and settings. | `./data` |
-| `SIRIS_USER`, `SIRIS_PASSWORD` | Turn on a password prompt for the web UI. | off |
+| `SIRIS_USER`, `SIRIS_PASSWORD` | Turn on a password prompt for the web UI. Set this if the app can be reached from outside your home network. | off |
+| `SIRIS_GPU` | `off` forces CPU video encoding. | auto |
+| `SIRIS_GEOCODER` | `off` disables `{place}` lookups, or a URL for your own Nominatim server. | OpenStreetMap |
 
 The app can only read and write inside these folders.
 
@@ -92,11 +119,21 @@ The app can only read and write inside these folders.
 *Apply settings…* to copy the current look to all of them, and *Export… →
 Selected*.
 
-**Shortcuts:** `←`/`→` previous/next · hold `B` before/after · `C` crop ·
+**Shortcuts:** `←`/`→` previous/next · `Space` play/pause video · hold `B` before/after · `C` crop ·
 `I`/`O` set video trim in/out · `Esc` leave crop.
 
-**D-Log / HLG footage:** upload your drone maker's official Rec.709 LUT in
-*Colour → LUT*, set it on one clip, then *Apply settings…* to the rest.
+**Mini 3 Pro D-Cinelike footage** is 10-bit and flat. Apply the
+**D-Cinelike → BRM Blue** preset (the watch folder does this automatically for
+10-bit clips), or upload a `.cube` LUT in *Colour → LUT*.
+
+**Apple TV 4K screensavers:** use *Export… → Apple TV 4K*, or let the watch
+folder do it. Files are HEVC 10-bit `hvc1`, 3840 × 2160, at the clip's own frame
+rate up to 60 fps (120 fps slow-mo clips are reduced to 60, the most Apple TV
+plays). Add them to the album or app your screensaver uses.
+
+**Place names** come from OpenStreetMap's free Nominatim service, at most one
+lookup per second, cached per location. For videos the GPS is read from the
+DJI `.SRT` file saved next to the clip, so keep those together on the NAS.
 
 ## How it works
 
@@ -108,6 +145,10 @@ Selected*.
   their precision.
 - `app/video.py` builds an FFmpeg filter graph that mirrors those steps one for
   one. A test checks that the photo and video pipelines produce the same image.
+- `app/recipes.py` and `app/analysis.py` hold the one-click recipes and the
+  automatic horizon/exposure fixes; `app/watch.py` is the watch folder.
+- `app/gpu.py` detects NVENC/NVDEC with real test encodes and picks GPU or CPU
+  encoder settings; `app/hdr.py` fuses brackets; `app/geo.py` handles `{place}`.
 - `app/jobs.py` runs exports one at a time in the background and writes each
   file to a temporary name before renaming it into place.
 - `app/static/` is the browser UI: plain HTML, CSS and JS with no build step.

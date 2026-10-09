@@ -131,3 +131,117 @@ def test_unmounted_nas_is_not_created(tmp_path):
         r = c.post("/api/export", json={"media_ids": [], "options": {"root": "NAS"}})
         assert r.status_code == 400 and "not reachable" in r.json()["detail"]
     assert not missing.exists()
+
+
+def test_export_name_pattern_and_custom_size(client, env, tmp_path):
+    _, out, _ = env
+    a = upload(client, make_photo(tmp_path / "DJI_0001.JPG", 1600, 1200))
+    b = upload(client, make_photo(tmp_path / "DJI_0002.JPG", 1600, 1200))
+    opts = {"root": "NAS", "folder": "named", "name_pattern": "Golden Bay {n} {name}", "photo_size": "1080x1350"}
+    r = client.post("/api/export", json={"media_ids": [a["id"], b["id"]], "options": opts})
+    assert r.status_code == 200, r.text
+    client.app_state.jobs.wait_idle()
+    # newest upload first in the request order given
+    assert Image.open(out / "named" / "Golden Bay 001 DJI_0001.jpg").size == (1080, 810)  # fits the box, keeps 4:3
+    assert (out / "named" / "Golden Bay 002 DJI_0002.jpg").exists()
+    # height-only box and a custom long edge
+    client.post("/api/export", json={"media_ids": [a["id"]], "options": {"root": "NAS", "folder": "h",
+                                                                          "photo_size": "x600", "name_pattern": "{name}"}})
+    client.post("/api/export", json={"media_ids": [a["id"]], "options": {"root": "NAS", "folder": "le",
+                                                                          "photo_size": "1000", "name_pattern": "../{name}"}})
+    client.app_state.jobs.wait_idle()
+    assert Image.open(out / "h" / "DJI_0001.jpg").size == (800, 600)
+    assert Image.open(out / "le" / "DJI_0001.jpg").size == (1000, 750)  # "../" stripped, stays in folder
+    saved = client.get("/api/config").json()["settings"]["export"]
+    assert saved["photo_size"] == "1000" or saved["photo_size"] == 1000
+
+
+def test_old_suffix_setting_still_works():
+    from app.jobs import normalize_export
+    assert normalize_export({"suffix": "_web"})["name_pattern"] == "{name}_web"
+    assert normalize_export({})["name_pattern"] == "{name}_BRM"
+
+
+def test_video_playback_original_and_edited(client, env, tmp_path):
+    _, out, raw = env
+    make_video(raw / "h264.mp4", seconds=2)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc2=size=640x360:rate=30", "-t", "2", "-c:v", "libx265", "-x265-params", "log-level=error",
+                    "-pix_fmt", "yuv420p10le", str(raw / "hevc.mp4")], check=True)
+    items = {i["name"]: i for i in client.post("/api/media/import", json={"root": "Footage", "path": ""}).json()["added"]}
+    pb = client.app_state.playback
+
+    # H.264 8-bit plays as-is, with byte-range support for seeking
+    st = client.post(f"/api/media/{items['h264.mp4']['id']}/playback", json={"mode": "original"}).json()
+    assert st["status"] == "ready" and "url" in st and "path" not in st
+    r = client.get(st["url"], headers={"Range": "bytes=0-99"})
+    assert r.status_code == 206 and len(r.content) == 100
+
+    # HEVC 10-bit gets an H.264 copy
+    hid = items["hevc.mp4"]["id"]
+    st = client.post(f"/api/media/{hid}/playback", json={"mode": "original"}).json()
+    assert st["status"] in ("queued", "rendering", "ready")
+    st = pb.wait(st["key"])
+    assert st["status"] == "ready", st
+    info = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", st["path"]],
+                                     capture_output=True, text=True).stdout)["streams"][0]
+    assert info["codec_name"] == "h264" and info["pix_fmt"] == "yuv420p"
+
+    # edited preview: trim + speed + crop applied, cached by edit
+    edit = client.get(f"/api/media/{hid}/edit").json()
+    edit["video"] = {"trim_start": 0.5, "trim_end": 1.5, "speed": 2, "mute": True}
+    edit["crop"] = {"x": 0, "y": 0, "w": 0.5, "h": 0.5}
+    st = client.post(f"/api/media/{hid}/playback", json={"mode": "edited", "edit": edit}).json()
+    st = pb.wait(st["key"])
+    assert st["status"] == "ready", st
+    fmt = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
+                                     st["path"]], capture_output=True, text=True).stdout)
+    assert abs(float(fmt["format"]["duration"]) - 0.5) < 0.15
+    assert (fmt["streams"][0]["width"], fmt["streams"][0]["height"]) == (320, 180)
+    again = client.post(f"/api/media/{hid}/playback", json={"mode": "edited", "edit": edit}).json()
+    assert again["status"] == "ready" and again["key"] == st["key"]
+    assert client.get(again["url"]).status_code == 200
+
+    # photos can't be played
+    p = upload(client, make_photo(tmp_path / "p.jpg", 300, 200))
+    assert client.post(f"/api/media/{p['id']}/playback", json={"mode": "original"}).status_code == 400
+
+
+def test_gpu_falls_back_to_cpu_and_new_video_filters(client, env, tmp_path):
+    """Pretend an NVIDIA GPU exists: NVENC/CUDA fail in this sandbox, so the job must redo it on the CPU."""
+    from app import gpu, video
+    _, out, raw = env
+    make_video(raw / "clip.mp4", seconds=2)
+    item = client.post("/api/media/import", json={"root": "Footage", "path": ""}).json()["added"][0]
+    edit = client.get(f"/api/media/{item['id']}/edit").json()
+    edit["video"].update({"stabilize": 60, "denoise": 50})
+    edit["grad"] = {"strength": 50, "height": 60, "color": "#1e4a8a"}
+    client.put(f"/api/media/{item['id']}/edit", json=edit)
+
+    gpu.set_status_for_tests({"available": True, "h264": True, "hevc": True, "decode": True,
+                              "name": "RTX 3060", "reason": ""})
+    try:
+        args, pix, on_gpu = video.encoder_settings("h265", "max", use_gpu=True)
+        assert on_gpu and "hevc_nvenc" in args and pix == "p010le" and "hvc1" in args
+        assert "h264_nvenc" in video.encoder_settings("h264", use_gpu=True)[0]
+        assert video.encoder_settings("h264", use_gpu=False)[2] is False
+        assert video.encoder_settings("prores", use_gpu=True)[2] is False
+        assert gpu.decode_args(True) == ["-hwaccel", "cuda"]
+        client.post("/api/export", json={"media_ids": [item["id"]],
+                                         "options": {"root": "NAS", "video_codec": "h265", "video_fps": "max60"}})
+        client.app_state.jobs.wait_idle(180)
+    finally:
+        gpu.set_status_for_tests(None)
+    job = client.get("/api/jobs").json()[-1]
+    assert job["status"] == "done", job
+    info = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams",
+                                      job["output"]], capture_output=True, text=True).stdout)["streams"][0]
+    assert info["codec_name"] == "hevc" and info["pix_fmt"] == "yuv420p10le"
+
+
+def test_fps_cap_for_apple_tv():
+    from app.jobs import output_fps
+    assert output_fps("max60", {"fps": 119.88}) == 60.0
+    assert output_fps("max60", {"fps": 59.94}) is None
+    assert output_fps("source", {"fps": 120}) is None
+    assert output_fps(25.0, {"fps": 60}) == 25.0

@@ -53,7 +53,16 @@ def from_array(arr: np.ndarray):
 def load_photo(path: Path, max_long_edge: int | None = None):
     """Load a photo upright. Returns (source, info) where info has exif/icc bytes."""
     path = Path(path)
-    if path.suffix.lower() in RAW_EXTS:
+    if path.suffix.lower() in TIFF_EXTS and _is_high_bit_tiff(path):
+        import tifffile
+        arr = tifffile.imread(path)
+        if arr.ndim == 2:
+            arr = np.repeat(arr[..., None], 3, axis=2)
+        arr = arr[..., :3]
+        src = from_array(arr.astype(np.uint16) if arr.dtype != np.uint8 else arr)
+        sidecar = path.with_suffix(".exif")
+        info = {"exif": sidecar.read_bytes() if sidecar.exists() else None, "icc": None}
+    elif path.suffix.lower() in RAW_EXTS:
         import rawpy
         with rawpy.imread(str(path)) as raw:
             half = bool(max_long_edge and max(raw.sizes.width, raw.sizes.height) > 2 * max_long_edge)
@@ -76,6 +85,19 @@ def load_photo(path: Path, max_long_edge: int | None = None):
     return src, info
 
 
+TIFF_EXTS = {".tif", ".tiff"}
+
+
+def _is_high_bit_tiff(path: Path) -> bool:
+    """16-bit / float TIFFs (e.g. merged HDRs) need tifffile; Pillow handles 8-bit ones."""
+    try:
+        import tifffile
+        with tifffile.TiffFile(path) as tf:
+            return tf.pages[0].dtype != np.uint8
+    except Exception:
+        return False
+
+
 def _exif_from_raw(path: Path):
     try:
         with Image.open(path) as im:  # Pillow reads the TIFF/EXIF container of most DNGs
@@ -92,6 +114,11 @@ def photo_size(path: Path) -> tuple[int, int]:
             s = raw.sizes
             w, h = s.width, s.height
             return (h, w) if s.flip in (5, 6) else (w, h)
+    if path.suffix.lower() in TIFF_EXTS and _is_high_bit_tiff(path):
+        import tifffile
+        with tifffile.TiffFile(path) as tf:
+            shape = tf.pages[0].shape
+        return shape[1], shape[0]
     with Image.open(path) as img:
         w, h = img.size
         orientation = img.getexif().get(274, 1)
@@ -175,6 +202,34 @@ def vignette_overlay(w: int, h: int, amount: float) -> Image.Image:
     return Image.fromarray(out, "RGBA")
 
 
+GRAD_MAX = 0.8  # top-edge opacity of the sky filter at strength 100
+
+
+def grad_alpha(w: int, h: int, grad: dict) -> np.ndarray:
+    """Opacity of the graduated filter: full strength at the top, gone by `height` %."""
+    y = (np.arange(h, dtype=np.float32) + 0.5) / h
+    t = np.clip(y / (grad["height"] / 100), 0, 1)
+    col = (1 - t * t * (3 - 2 * t)) * (grad["strength"] / 100 * GRAD_MAX)
+    return np.repeat(col[:, None], w, axis=1)
+
+
+def apply_grad(rgb: np.ndarray, grad: dict) -> np.ndarray:
+    if not grad["strength"]:
+        return rgb
+    a = np.round(grad_alpha(rgb.shape[1], rgb.shape[0], grad) * 255)[..., None] / 255
+    c = np.array([int(grad["color"][i:i + 2], 16) for i in (1, 3, 5)], np.float32) / 255
+    rgb *= 1 - a
+    rgb += c * a
+    return rgb
+
+
+def grad_overlay(w: int, h: int, grad: dict) -> Image.Image:
+    out = np.zeros((h, w, 4), np.uint8)
+    out[..., :3] = [int(grad["color"][i:i + 2], 16) for i in (1, 3, 5)]
+    out[..., 3] = np.round(grad_alpha(w, h, grad) * 255).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
 def _box_blur(a: np.ndarray, size: int) -> np.ndarray:
     r = size // 2
     for axis in (0, 1):
@@ -217,12 +272,42 @@ def render(src, edit: dict, *, long_edge: int | None = None, mode: str = "final"
     del img
     rgb = grading.grade_image(rgb, edit["grade"], n=33 if fast else 65, in_place=True)
     if mode == "final":
+        apply_grad(rgb, edit["grad"])
         apply_vignette(rgb, edit["vignette"])
         apply_sharpen(rgb, edit["sharpen"])
         if edit["stamp"]["enabled"] and stamp_mask is not None:
             stamp, x, y = render_stamp(stamp_mask, out_w, out_h, edit["stamp"])
             composite(rgb, stamp, x, y)
     return rgb
+
+
+SLIDE_W, SLIDE_H = 1080, 1350  # Instagram portrait (4:5)
+MAX_SLIDES = 20
+
+
+def carousel_layout(cw: float, ch: float) -> tuple[int, tuple[int, int]]:
+    """Number of slides and the render size that covers n*1080 x 1350 for a cw x ch crop."""
+    n = int(np.clip(round(cw / ch * SLIDE_H / SLIDE_W), 2, MAX_SLIDES))
+    k = max(n * SLIDE_W / cw, SLIDE_H / ch)
+    return n, (max(n * SLIDE_W, round(cw * k)), max(SLIDE_H, round(ch * k)))
+
+
+def render_carousel(src, edit: dict, stamp_mask=None) -> list[np.ndarray]:
+    """Split a (panorama) crop into seamless 4:5 slides; the stamp goes on the last one."""
+    edit = normalize_edit(edit)
+    w, h = src_size(src)
+    geo = plan_geometry(w, h, edit)
+    n, box = carousel_layout(geo.cw, geo.ch)
+    rgb = render(src, {**edit, "stamp": {**edit["stamp"], "enabled": False}}, long_edge=box,
+                 allow_upscale=True)
+    H, W = rgb.shape[:2]
+    x0, y0 = (W - n * SLIDE_W) // 2, (H - SLIDE_H) // 2
+    strip = rgb[y0:y0 + SLIDE_H, x0:x0 + n * SLIDE_W]
+    slides = [np.ascontiguousarray(strip[:, i * SLIDE_W:(i + 1) * SLIDE_W]) for i in range(n)]
+    if edit["stamp"]["enabled"] and stamp_mask is not None:
+        st, x, y = render_stamp(stamp_mask, SLIDE_W, SLIDE_H, edit["stamp"])
+        composite(slides[-1], st, x, y)
+    return slides
 
 
 def to_uint8(rgb: np.ndarray) -> np.ndarray:
