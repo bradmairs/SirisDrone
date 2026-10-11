@@ -205,7 +205,7 @@
   <form method="dialog">
     <h2>Automation – watch folder</h2>
     <p class="hint">Copy drone files into this NAS folder and they're edited (BRM Blue, stamp, level horizon,
-      exposure) and exported automatically. Originals are never changed. Each file also appears in the library so you can tweak and re-export it.</p>
+      exposure) and exported automatically. Originals are never changed unless you tick “Delete each file once it's exported”. Each file also appears in the library so you can tweak and re-export it.</p>
     <label class="chk"><input type="checkbox" id="wEnabled"> <b>Watch for new files</b></label>
     <div class="field"><label>Watch this NAS folder</label>
       <div class="row"><select id="wRoot"></select><input id="wFolder" placeholder="sub-folder, e.g. Inbox"></div></div>
@@ -225,6 +225,8 @@
       <label class="chk"><input type="checkbox" id="wRecursive"> Include sub-folders</label>
       <label class="chk"><input type="checkbox" id="wExisting"> Also process files already in the folder</label>
     </div>
+    <label class="chk" title="For when the watch folder holds copies of originals kept elsewhere"><input type="checkbox" id="wDelete"> Delete each file from the watch folder once it's exported</label>
+    <p class="hint">Only files picked up while this is ticked, and only after their export has finished. Failed exports and “Edit only” files are kept. The watch folder must be writable.</p>
     <p class="hint">10-bit Mini 3 Pro videos are treated as D-Cinelike and get the “D-Cinelike → BRM Blue” look.</p>
     <div class="field"><label>Activity</label><ul class="jobs auto-log" id="wLog"></ul></div>
     <div class="dlg-actions">
