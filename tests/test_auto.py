@@ -61,9 +61,22 @@ def test_auto_endpoint_and_instagram_quick_export(client, env, tmp_path, monkeyp
     assert len(files) == 1, files
     assert files[0].name.endswith("Wharariki Beach DJI_0100 IG.jpg")
     im = Image.open(files[0])
-    assert im.size == (1080, 1350)
+    assert im.width == 1080 and abs(im.width / im.height - 4 / 3) < 0.02  # stays landscape
     assert 0x8825 not in im.getexif()                       # GPS stripped for social
-    assert client.get(f"/api/media/{item['id']}/edit").json()["aspect"] == "4:5"
+    assert client.get(f"/api/media/{item['id']}/edit").json()["aspect"] == "original"
+
+
+def test_instagram_keeps_orientation(client, env, tmp_path):
+    _, out, _ = env
+    cases = {"PORT_0001.JPG": (900, 1600), "WIDE_0002.JPG": (1900, 1000), "SQR_0003.JPG": (1000, 1000)}
+    ids = [upload(client, horizon_scene(tmp_path / n, 0, w=w, h=h))["id"] for n, (w, h) in cases.items()]
+    client.post("/api/quick-export", json={"recipe": "instagram", "media_ids": ids,
+                                           "root": "NAS", "folder": "ig"})
+    client.app_state.jobs.wait_idle()
+    size = {f.name.split(" IG")[0].split(" ")[-1]: Image.open(f).size for f in (out / "ig").glob("*.jpg")}
+    assert size["PORT_0001"] == (1080, 1350)                 # too tall: cropped to 4:5
+    assert size["WIDE_0002"][0] == 1080 and abs(1080 / size["WIDE_0002"][1] - 1.91) < 0.02
+    assert size["SQR_0003"] == (1080, 1080)
 
 
 def test_panorama_becomes_carousel(client, env, tmp_path):

@@ -4,13 +4,17 @@ from __future__ import annotations
 from . import analysis, geo, grading
 from .edits import normalize_edit, plan_geometry
 
-PANORAMA_ASPECT = 2.0  # wider than 2:1 → Instagram carousel instead of a single 4:5 post
+PANORAMA_ASPECT = 2.0  # wider than 2:1 → Instagram carousel instead of a single post
+# Shapes Instagram shows uncropped in the feed: 4:5 portrait up to 1.91:1 landscape.
+IG_TALLEST, IG_WIDEST = 4 / 5, 1.91
 
 RECIPES: dict[str, dict] = {
     "instagram": {
         "label": "Instagram post",
         "kinds": ["photo"],
-        "help": "4:5 crop, 1080 × 1350 JPEG, stamp, GPS removed. Panoramas become a carousel.",
+        "help": "Keeps the photo's orientation: landscape stays landscape (1080 wide, cropped only "
+                "past 1.91:1), portrait is cropped to 4:5 (1080 × 1350). JPEG, stamp, GPS removed. "
+                "Panoramas become a carousel.",
         "options": {"photo_format": "jpeg", "jpeg_quality": 92, "photo_size": "1080x1350",
                     "keep_metadata": True, "strip_gps": True,
                     "name_pattern": "{date} {place} {name} IG"},
@@ -68,12 +72,26 @@ def resolve(recipe: str, item: dict, edit: dict) -> str:
     return "carousel" if recipe == "instagram" and is_panorama(item, edit) else recipe
 
 
+def instagram_crop(item: dict, edit: dict) -> dict:
+    """Keep the photo's own orientation and shape; only crop what Instagram would cut off.
+    A crop the user already chose is kept when Instagram can show it as is."""
+    fa = frame_aspect(item, edit)
+    c = edit["crop"]
+    if edit["aspect"] != "original" and IG_TALLEST - 0.01 <= fa * c["w"] / c["h"] <= IG_WIDEST + 0.01:
+        return edit
+    if fa < IG_TALLEST:
+        return {**edit, "aspect": "4:5", "crop": aspect_crop(item, edit, IG_TALLEST)}
+    if fa > IG_WIDEST:
+        return {**edit, "aspect": "free", "crop": aspect_crop(item, edit, IG_WIDEST)}
+    return {**edit, "aspect": "original", "crop": {"x": 0, "y": 0, "w": 1, "h": 1}}
+
+
 def recipe_edit(recipe: str, item: dict, edit: dict) -> dict:
-    """The edit a recipe needs (e.g. a 4:5 crop for Instagram), keeping the user's own crop
-    when they already chose that shape."""
+    """The edit a recipe needs (e.g. Instagram's shape limits), keeping the user's own crop
+    when it already fits."""
     edit = normalize_edit(edit)
-    if recipe == "instagram" and edit["aspect"] != "4:5":
-        edit = {**edit, "aspect": "4:5", "crop": aspect_crop(item, edit, 4 / 5)}
+    if recipe == "instagram":
+        edit = instagram_crop(item, edit)
     elif recipe == "carousel" and edit["aspect"] in ("4:5", "1:1", "9:16"):
         edit = {**edit, "aspect": "original", "crop": {"x": 0, "y": 0, "w": 1, "h": 1}}
     return normalize_edit(edit)

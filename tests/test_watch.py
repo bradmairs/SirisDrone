@@ -37,7 +37,7 @@ def test_watch_folder_auto_edits_and_exports(client, env, tmp_path):
 
     auto = out / "Auto"
     photo = next(auto.glob("*DJI_0500 IG.jpg"))
-    assert Image.open(photo).size == (1080, 1350)
+    assert Image.open(photo).width == 1080 and Image.open(photo).height < 1080  # landscape kept
     assert len(list(auto.glob("*PANO_0501 IG_*.jpg"))) == 5
     vid = next(auto.glob("*DJI_0502 ATV.mp4"))
     s = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", str(vid)],
@@ -47,7 +47,7 @@ def test_watch_folder_auto_edits_and_exports(client, env, tmp_path):
     # the photo was levelled and is in the library for later tweaking; nothing in the inbox changed
     item = next(i for i in client.get("/api/media").json() if i["name"] == "DJI_0500.JPG")
     edit = client.get(f"/api/media/{item['id']}/edit").json()
-    assert abs(edit["straighten"] + 3.0) <= 0.2 and edit["aspect"] == "4:5"
+    assert abs(edit["straighten"] + 3.0) <= 0.2 and edit["aspect"] == "original"
     assert edit["grade"]["blue_sat"] > 0 and edit["stamp"]["enabled"]
     assert sorted(p.name for p in inbox.iterdir()) == ["DJI_0500.JPG", "DJI_0502.MP4", "OLD_0001.JPG",
                                                        "PANO_0501.JPG", "notes.txt"]
