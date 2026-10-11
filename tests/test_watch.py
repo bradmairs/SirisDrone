@@ -99,3 +99,26 @@ def test_watch_folder_deletes_originals_once_exported(client, env):
     job.status, job.error = "done", None
     w.scan()
     assert keep.exists()
+
+
+def test_watch_folder_exports_instagram_and_full_jpeg(client, env):
+    _, out, raw = env
+    inbox = raw / "Both"
+    inbox.mkdir()
+    w = client.app_state.watcher
+    w.min_age = 0
+    r = client.put("/api/watch", json={"enabled": True, "root": "Footage", "folder": "Both",
+                                       "out_root": "NAS", "out_folder": "Mine", "interval": 3600,
+                                       "photos": "both", "delete_originals": True})
+    assert r.status_code == 200 and r.json()["settings"]["photos"] == "both"
+    horizon_scene(inbox / "DJI_0700.JPG", 0, 1600, 1200)
+    assert w.scan() == 0 and w.scan() == 1
+    entry = w.seen[str(inbox / "DJI_0700.JPG")]
+    assert entry["action"] == "instagram + full" and len(entry["jobs"]) == 2
+    client.app_state.jobs.wait_idle(300)
+    w.scan()
+    ig = next((out / "Mine").glob("*DJI_0700 IG.jpg"))
+    full = out / "Mine" / "DJI_0700_BRM.jpg"
+    assert Image.open(ig).width == 1080
+    assert Image.open(full).size == (1600, 1200)            # full resolution
+    assert not (inbox / "DJI_0700.JPG").exists()            # deleted only after both exports
