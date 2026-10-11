@@ -29,7 +29,7 @@ DEFAULT_WATCH = {
     "recursive": False,
     "out_root": None,        # an output root, e.g. "NAS"
     "out_folder": "",        # e.g. "Auto exports"
-    "photos": "instagram",   # instagram | full | skip
+    "photos": "instagram",   # instagram | full | both (instagram + full) | skip
     "videos": "appletv",     # appletv | full | skip
     "auto_level": True,
     "auto_exposure": True,
@@ -37,7 +37,7 @@ DEFAULT_WATCH = {
     "process_existing": False,
     "delete_originals": False,  # delete each picked-up file once its export is done
 }
-PHOTO_ACTIONS = ("instagram", "full", "skip")
+PHOTO_ACTIONS = ("instagram", "full", "both", "skip")
 VIDEO_ACTIONS = ("appletv", "full", "skip")
 
 
@@ -183,14 +183,21 @@ class Watcher:
         if action == "skip":
             self.lib.set_edit(item["id"], edit)
             return {"item": item["id"], "action": "edited only"}
-        recipe = recipes.resolve(action, item, edit)
-        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
+        # "both": an Instagram copy plus a full-quality JPEG; the library keeps the full edit.
+        wanted = ["instagram", "full"] if action == "both" else [action]
         base = self.get_settings()["export"]
-        opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
-                                      "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
-        dest = self.export_dest(opts)
-        job = self.submit_export(item, edit, opts, dest, carousel=recipe == "carousel")
-        out = {"item": item["id"], "action": recipe, "job": job["id"]}
+        exports = []
+        for name in reversed(wanted):  # last one's edit is what the library keeps
+            recipe = recipes.resolve(name, item, edit)
+            r_edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
+            opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
+                                          "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
+            dest = self.export_dest(opts)
+            job = self.submit_export(item, r_edit, opts, dest, carousel=recipe == "carousel")
+            exports.append((recipe, job["id"]))
+        exports.reverse()
+        out = {"item": item["id"], "action": " + ".join(r for r, _ in exports),
+               "job": exports[0][1], "jobs": [j for _, j in exports]}
         if w["delete_originals"]:
             out["delete_after"] = True
         return out
@@ -205,12 +212,14 @@ class Watcher:
             path = Path(key)
             if not path.resolve().is_relative_to(base):
                 continue  # watch folder changed since: leave it alone
-            job = self.get_job(entry.get("job"))
-            if job is None:
+            found = [self.get_job(j) for j in entry.get("jobs") or [entry.get("job")]]
+            bad = next((j for j in found if j and j["status"] not in ("queued", "running", "done")), None)
+            if None in found:
                 entry["kept"] = "export didn't finish before the app restarted"
-            elif job["status"] in ("queued", "running"):
+            elif any(j["status"] in ("queued", "running") for j in found):
                 continue
-            elif job["status"] != "done" or not job.get("output") or not Path(job["output"]).exists():
+            elif bad or not all(j.get("output") and Path(j["output"]).exists() for j in found):
+                job = bad or found[0]
                 entry["kept"] = f"export {job['status']}" + (f": {job['error']}" if job.get("error") else "")
             else:
                 try:
