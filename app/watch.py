@@ -170,7 +170,23 @@ class Watcher:
             self.status["waiting"] = waiting
         return done
 
+    @staticmethod
+    def jpeg_twin(path: Path) -> Path | None:
+        """The camera JPEG of the same shot when `path` is a DNG beside it (DJI saves both)."""
+        if path.suffix.lower() != ".dng":
+            return None
+        return next((path.with_suffix(e) for e in (".JPG", ".jpg", ".JPEG", ".jpeg")
+                     if path.with_suffix(e).exists()), None)
+
     def process(self, path: Path, w: dict) -> dict:
+        twin = self.jpeg_twin(path)
+        if twin is not None:
+            # One edit per shot. The camera JPEG looks better than our DNG development (lens
+            # corrections, sharpening, its own colour), so it is the one used.
+            out = {"item": None, "action": "skipped: JPEG used", "pair": str(twin)}
+            if w["delete_originals"]:
+                out["delete_after"] = True
+            return out
         kind = media_kind(path.name)
         action = w["photos"] if kind == "photo" else w["videos"]
         default_edit = self.get_settings()["default_edit"]
@@ -212,6 +228,26 @@ class Watcher:
             path = Path(key)
             if not path.resolve().is_relative_to(base):
                 continue  # watch folder changed since: leave it alone
+            if "pair" in entry:  # a DNG skipped for its JPEG: goes once the JPEG has gone
+                twin = self.seen.get(entry["pair"], {})
+                if "deleted" in twin:
+                    try:
+                        st = path.stat()
+                        if (st.st_size, st.st_mtime) == (entry["size"], entry["mtime"]):
+                            path.unlink()
+                            entry["deleted"] = time.time()
+                            removed += 1
+                        else:
+                            entry["kept"] = "file changed after it was picked up"
+                    except FileNotFoundError:
+                        entry["deleted"] = time.time()
+                    except OSError as exc:
+                        entry["kept"] = f"couldn't delete: {exc.strerror or exc}"
+                elif "kept" in twin:
+                    entry["kept"] = "its JPEG was kept"
+                if "kept" in entry:
+                    self._error(f"{path.name}: original kept ({entry['kept']})")
+                continue
             found = [self.get_job(j) for j in entry.get("jobs") or [entry.get("job")]]
             bad = next((j for j in found if j and j["status"] not in ("queued", "running", "done")), None)
             if None in found:

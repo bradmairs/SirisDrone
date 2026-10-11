@@ -122,3 +122,25 @@ def test_watch_folder_exports_instagram_and_full_jpeg(client, env):
     assert Image.open(ig).width == 1080
     assert Image.open(full).size == (1600, 1200)            # full resolution
     assert not (inbox / "DJI_0700.JPG").exists()            # deleted only after both exports
+
+
+def test_watch_folder_uses_jpeg_and_skips_its_dng_twin(client, env):
+    _, out, raw = env
+    inbox = raw / "Twins"
+    inbox.mkdir()
+    w = client.app_state.watcher
+    w.min_age = 0
+    r = client.put("/api/watch", json={"enabled": True, "root": "Footage", "folder": "Twins",
+                                       "out_root": "NAS", "out_folder": "T", "interval": 3600,
+                                       "photos": "full", "delete_originals": True})
+    assert r.status_code == 200
+    horizon_scene(inbox / "DJI_0800.JPG", 0, 800, 600)
+    (inbox / "DJI_0800.DNG").write_bytes(b"raw twin (never decoded: it is skipped)")
+    w.scan(); w.scan()
+    dng, jpg = str(inbox / "DJI_0800.DNG"), str(inbox / "DJI_0800.JPG")
+    assert w.seen[dng]["action"] == "skipped: JPEG used" and w.seen[jpg]["action"] == "full"
+    client.app_state.jobs.wait_idle(300)
+    w.scan()  # JPEG exported and deleted
+    w.scan()  # then its DNG twin goes too
+    assert not any(inbox.iterdir())
+    assert len(list((out / "T").glob("DJI_0800*.jpg"))) == 1

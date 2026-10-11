@@ -73,9 +73,16 @@ def auto_straighten(src, edit: dict) -> float | None:
     return round(-found[0], 1)  # rotate against the tilt
 
 
+MID_LOW, MID_HIGH = 0.36, 0.52  # median brightness range that needs no exposure change
+
+
 def auto_exposure(src, edit: dict) -> float:
-    """Exposure (EV) that puts the mid-tones around 45% without clipping highlights,
-    measured through the item's own grade."""
+    """Exposure (EV) that brings the mid-tones into a good range (36–52% after the item's own
+    grade) without blowing out highlights. Already-good shots are left at 0.
+
+    Highlight clipping is judged with the grade's saturation boosts turned off: the BRM Blue
+    look deliberately saturates the blue channel of sky and sea, which used to block every
+    brightening. Real clipping still counts; a few sun glints don't (top 1% of pixels)."""
     e = normalize_edit(edit)
     small = render.render(src, {**e, "grade": {**e["grade"], "exposure": 0}, "stamp": {"enabled": False},
                                 "vignette": 0, "grad": {"strength": 0}},
@@ -84,10 +91,12 @@ def auto_exposure(src, edit: dict) -> float:
 
     user_lut = grading.load_user_lut(e["grade"]["lut"])
 
+    plain = {**e["grade"], "vibrance": 0, "saturation": 0, "blue_sat": 0}
+
     def stats(ev):
         out = grading.grade_pixels(lut_free, {**e["grade"], "exposure": ev}, user_lut)
-        # mid-tones by brightness; highlights by the brightest channel (blue skies clip first)
-        return float(np.median(out @ grading.LUMA)), float(np.quantile(out.max(axis=1), 0.995))
+        flat = grading.grade_pixels(lut_free, {**plain, "exposure": ev}, user_lut)
+        return float(np.median(out @ grading.LUMA)), float(np.quantile(flat.max(axis=1), 0.99))
 
     def solve(fn, target):
         lo, hi = -2.0, 2.0
@@ -99,7 +108,10 @@ def auto_exposure(src, edit: dict) -> float:
                 hi = mid
         return (lo + hi) / 2
 
-    ev_mid = solve(lambda ev: stats(ev)[0], 0.42)
+    mid = stats(0.0)[0]
+    if MID_LOW <= mid <= MID_HIGH:
+        return 0.0
+    ev_mid = solve(lambda ev: stats(ev)[0], MID_LOW if mid < MID_LOW else MID_HIGH)
     ev_hi = solve(lambda ev: stats(ev)[1], 0.98)
     ev = min(ev_mid, max(ev_hi, 0.0)) if ev_mid > 0 else ev_mid  # never brighten into clipping
     return round(float(np.clip(ev, -1.5, 1.5)) / 0.05) * 0.05
