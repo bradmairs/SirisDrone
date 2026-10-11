@@ -5,6 +5,7 @@ high bit-depth material such as DNG, a tuple of three float ("F" mode) channels.
 """
 from __future__ import annotations
 
+import functools
 import math
 from pathlib import Path
 
@@ -66,8 +67,8 @@ def load_photo(path: Path, max_long_edge: int | None = None):
         import rawpy
         with rawpy.imread(str(path)) as raw:
             half = bool(max_long_edge and max(raw.sizes.width, raw.sizes.height) > 2 * max_long_edge)
-            rgb = raw.postprocess(use_camera_wb=True, output_bps=16, half_size=half)
-        src = from_array(rgb)
+            rgb = _decode_raw(raw, half)
+        src = from_array(apply_raw_look(rgb, *raw_look(path)))
         info = {"exif": _exif_from_raw(path), "icc": None}
     else:
         img = Image.open(path)
@@ -86,6 +87,124 @@ def load_photo(path: Path, max_long_edge: int | None = None):
 
 
 TIFF_EXTS = {".tif", ".tiff"}
+
+# A plain raw decode is about half as bright as the drone's own JPEG and has no contrast
+# curve, so DNG edits came out dark and flat. (When both exist the watch folder uses the JPEG,
+# which also has the camera's lens corrections and sharpening; this is for DNG-only shots.) Each DNG gets a tone curve that matches the
+# camera JPEG of the same shot when one is beside it (or in a JPEG/ folder next to a DNG/
+# folder), otherwise this one: the median DJI Mini 3 Pro JPEG curve measured on 18 real
+# DNG + JPEG pairs (input: raw decode with no auto-brightening, both gamma encoded).
+DJI_JPEG_CURVE = (
+    (0.0, 0.0), (0.07, 0.19), (0.133, 0.308), (0.195, 0.447), (0.258, 0.545), (0.32, 0.625),
+    (0.383, 0.71), (0.445, 0.79), (0.508, 0.85), (0.57, 0.895), (0.633, 0.93), (0.695, 0.955),
+    (0.758, 0.97), (0.82, 0.98), (0.9, 0.99), (1.0, 1.0),
+)
+DJI_JPEG_SATURATION = 1.15  # camera JPEGs are about this much more saturated after the curve
+_CURVE_BINS = 64
+_LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
+
+
+def _decode_raw(raw, half: bool) -> np.ndarray:
+    # no_auto_bright: LibRaw's auto brightening depends on each shot's brightest pixels, so
+    # it varied shot to shot; the tone curve sets the brightness instead.
+    return raw.postprocess(use_camera_wb=True, output_bps=16, half_size=half, no_auto_bright=True)
+
+
+def sibling_jpeg(path: Path) -> Path | None:
+    """The camera JPEG of the same shot as a DNG, if it is next to it."""
+    path = Path(path)
+    dirs = [path.parent]
+    if path.parent.name.lower() in ("dng", "raw"):
+        dirs += [path.parent.parent / n for n in ("JPEG", "JPG", "jpeg", "jpg")]
+    for d in dirs:
+        for ext in (".JPG", ".jpg", ".JPEG", ".jpeg"):
+            p = d / (path.stem + ext)
+            if p.is_file():
+                return p
+    return None
+
+
+def fit_tone_curve(raw_rgb: np.ndarray, jpeg_rgb: np.ndarray) -> np.ndarray | None:
+    """Monotonic curve (values at _CURVE_BINS + 1 evenly spaced inputs) mapping raw-decode
+    luma to camera-JPEG luma for the same, pixel-aligned frame. One curve for all channels:
+    per-channel curves gave colour casts; saturation is matched separately."""
+    x, y = (raw_rgb @ _LUMA).ravel(), (jpeg_rgb @ _LUMA).ravel()
+    bins = np.clip((x * _CURVE_BINS).astype(int), 0, _CURVE_BINS - 1)
+    centres, values = [0.0], [0.0]
+    for i in range(_CURVE_BINS):
+        m = bins == i
+        if m.sum() >= 50:
+            centres.append((i + 0.5) / _CURVE_BINS)
+            values.append(float(np.median(y[m])))
+    if len(centres) < 6:
+        return None
+    centres.append(1.0)
+    values.append(1.0)
+    xs = np.linspace(0, 1, _CURVE_BINS + 1)
+    c = np.interp(xs, centres, values)
+    c = np.convolve(np.pad(c, 2, mode="edge"), np.ones(5) / 5, mode="valid")  # smooth noise
+    c = np.maximum.accumulate(c)
+    c[0], c[-1] = 0.0, 1.0
+    return c
+
+
+def _saturate(rgb: np.ndarray, gain: float) -> np.ndarray:
+    luma = (rgb @ _LUMA)[..., None]
+    return np.clip(luma + (rgb - luma) * gain, 0, 1)
+
+
+def _chroma(rgb: np.ndarray) -> float:
+    return float((rgb.max(axis=-1) - rgb.min(axis=-1)).mean())
+
+
+def apply_raw_look(rgb16: np.ndarray, lut: np.ndarray, gain: float) -> np.ndarray:
+    """Tone curves then saturation on a uint16 raw decode; returns float32 RGB in 0..1."""
+    out = np.empty(rgb16.shape, np.float32)
+    for y in range(0, rgb16.shape[0], 512):  # in strips: 48 MP frames are large
+        part = rgb16[y:y + 512]
+        curved = lut[part].astype(np.float32) / 65535
+        out[y:y + 512] = _saturate(curved, gain) if gain != 1 else curved
+    return out
+
+
+@functools.lru_cache(maxsize=64)
+def _raw_look(path: str, mtime: float, jpeg: str | None, jpeg_mtime: float) -> tuple[np.ndarray, float]:
+    xs = np.linspace(0, 1, _CURVE_BINS + 1)
+    curve, gain = None, DJI_JPEG_SATURATION
+    if jpeg:
+        try:
+            import rawpy
+            with rawpy.imread(path) as raw:
+                a = _decode_raw(raw, True).astype(np.float32) / 65535
+            h, w = a.shape[:2]
+            k = 800 / max(w, h)
+            size = (max(1, round(w * k)), max(1, round(h * k)))
+            a = np.dstack([np.asarray(Image.fromarray(a[..., i]).resize(size, Image.BOX)) for i in range(3)])
+            im = Image.open(jpeg)
+            im.draft("RGB", (1600, 1600))
+            im = ImageOps.exif_transpose(im).convert("RGB")
+            if (im.width > im.height) == (w > h):
+                b = np.asarray(im.resize(size, Image.BOX), np.float32) / 255
+                curve = fit_tone_curve(a, b)
+                if curve is not None:
+                    curved = np.interp(a, xs, curve)
+                    gain = float(np.clip(_chroma(b) / max(_chroma(curved), 1e-4), 1.0, 1.6))
+        except Exception:
+            curve, gain = None, DJI_JPEG_SATURATION
+    if curve is None:
+        px, py = zip(*DJI_JPEG_CURVE)
+        curve = np.interp(xs, px, py)
+    lut = np.round(np.interp(np.arange(65536) / 65535, xs, curve) * 65535).astype(np.uint16)
+    return lut, gain
+
+
+def raw_look(path: Path) -> tuple[np.ndarray, float]:
+    """(uint16 -> uint16 tone lookup table, saturation gain) that give a DNG decode the
+    camera JPEG's brightness, contrast and saturation."""
+    path = Path(path)
+    jpeg = sibling_jpeg(path)
+    return _raw_look(str(path), path.stat().st_mtime, str(jpeg) if jpeg else None,
+                     jpeg.stat().st_mtime if jpeg else 0.0)
 
 
 def _is_high_bit_tiff(path: Path) -> bool:
