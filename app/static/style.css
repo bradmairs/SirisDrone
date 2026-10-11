@@ -270,3 +270,4 @@ code { background: var(--bg); padding: 0 4px; border-radius: 3px; font-size: 11p
 .auto-log { max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 0; }
 .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
 .cols select, .cols input:not([type=checkbox]) { width: 100%; min-width: 0; }
+.version { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 7px; }

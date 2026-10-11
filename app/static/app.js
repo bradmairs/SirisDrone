@@ -1449,6 +1449,7 @@ function initViewer() {
 async function init() {
   state.cfg = await api("GET", "/api/config");
   state.luts = await api("GET", "/api/luts");
+  $("#appVersion").textContent = "v" + state.cfg.version;
   buildPanel();
   renderPresetGrid();
   initLibrary(); initDrop(); initBrowser(); initExport(); initJobs(); initViewer(); initCropDrag(); initTimeline();
