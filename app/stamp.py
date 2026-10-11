@@ -26,7 +26,12 @@ def load_mask(path: Path) -> Image.Image:
     return _load_mask(str(path), path.stat().st_mtime)
 
 
+AUTO = "auto"  # stamp colour chosen per image: black or white, whichever contrasts more
+
+
 def _hex_rgb(color: str) -> tuple[int, int, int]:
+    if color == AUTO:  # not resolved by the caller: fall back to the house black
+        return 0, 0, 0
     c = color.lstrip("#")
     return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
 
@@ -78,6 +83,31 @@ def render_stamp(mask: Image.Image, out_w: int, out_h: int, s: dict) -> tuple[Im
         x = (out_w - logo_w) // 2 - pad
     y = (out_h - margin - logo_h - pad) if pos[0] == "b" else (margin - pad)
     return img, x, y
+
+
+def contrast_color(rgb: np.ndarray, mask: Image.Image, s: dict) -> str:
+    """Black or white, whichever has the higher contrast ratio against the pixels the
+    stamp's letters will cover in this (graded, cropped) float RGB frame."""
+    h, w = rgb.shape[:2]
+    stamp, x, y = render_stamp(mask, w, h, {**s, "color": "#000000", "shadow": 0, "opacity": 100})
+    a = np.asarray(stamp, np.float32)[..., 3] / 255
+    x0, y0 = max(x, 0), max(y, 0)
+    x1, y1 = min(x + stamp.width, w), min(y + stamp.height, h)
+    if x1 <= x0 or y1 <= y0:
+        return "#000000"
+    region = np.clip(rgb[y0:y1, x0:x1, :3], 0, 1)
+    lin = np.where(region <= 0.04045, region / 12.92, ((region + 0.055) / 1.055) ** 2.4)
+    lum = lin @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    wgt = a[y0 - y:y1 - y, x0 - x:x1 - x]
+    L = float((lum * wgt).sum() / wgt.sum()) if wgt.sum() > 0 else float(lum.mean())
+    return "#ffffff" if 1.05 / (L + 0.05) > (L + 0.05) / 0.05 else "#000000"
+
+
+def resolve_color(rgb: np.ndarray, mask: Image.Image | None, s: dict) -> dict:
+    """The stamp settings with an "auto" colour replaced by black or white for this frame."""
+    if s.get("color") != AUTO or mask is None:
+        return s
+    return {**s, "color": contrast_color(rgb, mask, s)}
 
 
 def composite(rgb: np.ndarray, stamp: Image.Image, x: int, y: int) -> np.ndarray:

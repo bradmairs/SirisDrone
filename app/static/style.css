@@ -176,6 +176,7 @@ select, input:not([type=range]):not([type=checkbox]):not([type=color]) {
 .pos-grid .blank { visibility: hidden; }
 .swatches { display: flex; gap: 6px; align-items: center; }
 .swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+.swatch-auto { background: linear-gradient(135deg, #fff 50%, #000 50%); color: #888; font-size: 10px; font-weight: 700; }
 .swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 3px var(--accent); }
 input[type=color] { width: 30px; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 1px; cursor: pointer; }
 .stamp-preview { background: repeating-conic-gradient(#3a4553 0 25%, #222a34 0 50%) 0 0 / 12px 12px; border-radius: 6px; padding: 8px; display: grid; place-items: center; margin: 6px 0; }

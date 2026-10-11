@@ -17,10 +17,10 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import gpu, grading
+from . import gpu, grading, render
 from .edits import normalize_edit, plan_geometry
 from .render import SHARPEN_MAX, SHARPEN_SIZE, grad_overlay, vignette_overlay
-from .stamp import render_stamp
+from .stamp import AUTO, render_stamp, resolve_color
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts", ".m2ts"}
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
@@ -161,6 +161,23 @@ def prepare_stabilize(src: Path, meta: dict, edit: dict, workdir: Path, use_gpu:
            "-progress", "pipe:1", "-nostats", "-f", "null", "-"]
     run_ffmpeg(cmd, dur, None, cancel)
     return trf
+
+
+def resolve_stamp(path: Path, meta: dict, edit: dict, stamp_mask: Image.Image | None) -> dict:
+    """Pick black/white for an "auto" stamp colour from a graded frame halfway through the
+    trimmed clip, so one colour is used for the whole video."""
+    edit = normalize_edit(edit)
+    s = edit["stamp"]
+    if not s["enabled"] or s["color"] != AUTO or stamp_mask is None:
+        return edit
+    start, dur = _trim(meta, edit["video"])
+    try:
+        frame = extract_frame(path, meta, start + dur / 2, long_edge=1280)
+    except Exception:
+        return {**edit, "stamp": {**s, "color": "#000000"}}
+    rgb = render.render(render.from_array(frame), {**edit, "stamp": {**s, "enabled": False}},
+                        long_edge=1280)
+    return {**edit, "stamp": resolve_color(rgb, stamp_mask, s)}
 
 
 def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image | None,

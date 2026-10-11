@@ -53,3 +53,72 @@ def test_watch_folder_auto_edits_and_exports(client, env, tmp_path):
                                                        "PANO_0501.JPG", "notes.txt"]
     status = client.get("/api/watch").json()["status"]
     assert status["processed"] == 3 and not status["errors"]
+
+
+def test_watch_folder_deletes_originals_once_exported(client, env):
+    _, out, raw = env
+    inbox = raw / "To Edit"
+    inbox.mkdir()
+    old = raw / "Originals"
+    old.mkdir()
+    w = client.app_state.watcher
+    w.min_age = 0
+    horizon_scene(inbox / "OLD_0001.JPG", 0, 800, 600)          # there before: never deleted
+    r = client.put("/api/watch", json={"enabled": True, "root": "Footage", "folder": "To Edit",
+                                       "out_root": "NAS", "out_folder": "Auto", "interval": 3600,
+                                       "delete_originals": True, "photos": "full", "videos": "skip"})
+    assert r.status_code == 200, r.text
+    assert r.json()["settings"]["delete_originals"] is True
+
+    horizon_scene(inbox / "DJI_0600.JPG", 0, 800, 600)
+    make_video(inbox / "DJI_0601.MP4", size="320x180", seconds=1)  # "edit only": kept
+    assert w.scan() == 0 and w.scan() == 2
+    assert (inbox / "DJI_0600.JPG").exists()                       # not until the export is done
+    client.app_state.jobs.wait_idle(300)
+    w.scan()
+    assert next((out / "Auto").glob("*DJI_0600*.jpg")).exists()
+    assert sorted(p.name for p in inbox.iterdir()) == ["DJI_0601.MP4", "OLD_0001.JPG"]
+    assert "DJI_0600.JPG" not in [i["name"] for i in client.get("/api/media").json()]
+
+    # A failed export keeps the file.
+    horizon_scene(inbox / "DJI_0602.JPG", 0, 800, 600)
+    w.scan(); w.scan()
+    entry = w.seen[str(inbox / "DJI_0602.JPG")]
+    client.app_state.jobs.wait_idle(300)
+    job = client.app_state.jobs.jobs[entry["job"]]
+    job.status, job.error = "error", "disk full"
+    w.scan()
+    assert (inbox / "DJI_0602.JPG").exists() and "disk full" in w.seen[str(inbox / "DJI_0602.JPG")]["kept"]
+
+    # Files picked up before the setting was on, or outside the watch folder, are left alone.
+    keep = old / "DJI_0001.JPG"
+    horizon_scene(keep, 0, 800, 600)
+    st = keep.stat()
+    w.seen[str(keep)] = {"size": st.st_size, "mtime": st.st_mtime, "item": None, "job": entry["job"],
+                         "delete_after": True}
+    job.status, job.error = "done", None
+    w.scan()
+    assert keep.exists()
+
+
+def test_watch_folder_exports_instagram_and_full_jpeg(client, env):
+    _, out, raw = env
+    inbox = raw / "Both"
+    inbox.mkdir()
+    w = client.app_state.watcher
+    w.min_age = 0
+    r = client.put("/api/watch", json={"enabled": True, "root": "Footage", "folder": "Both",
+                                       "out_root": "NAS", "out_folder": "Mine", "interval": 3600,
+                                       "photos": "both", "delete_originals": True})
+    assert r.status_code == 200 and r.json()["settings"]["photos"] == "both"
+    horizon_scene(inbox / "DJI_0700.JPG", 0, 1600, 1200)
+    assert w.scan() == 0 and w.scan() == 1
+    entry = w.seen[str(inbox / "DJI_0700.JPG")]
+    assert entry["action"] == "instagram + full" and len(entry["jobs"]) == 2
+    client.app_state.jobs.wait_idle(300)
+    w.scan()
+    ig = next((out / "Mine").glob("*DJI_0700 IG.jpg"))
+    full = out / "Mine" / "DJI_0700_BRM.jpg"
+    assert Image.open(ig).width == 1080
+    assert Image.open(full).size == (1600, 1200)            # full resolution
+    assert not (inbox / "DJI_0700.JPG").exists()            # deleted only after both exports

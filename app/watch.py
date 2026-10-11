@@ -4,6 +4,11 @@ Each new file is added to the library (linked, never moved or changed), gets the
 edit (BRM Blue, stamp, level horizon, exposure; D-Cinelike look for 10-bit video), and is
 exported with a recipe: photos → Instagram post (panoramas → carousel), videos → Apple TV 4K.
 Files still being copied are left alone until their size stops changing.
+
+With `delete_originals` on, a file picked up while it is on is deleted from the watch folder
+(and dropped from the library) once its export has finished and the exported file exists. For
+when the watch folder holds copies of originals kept elsewhere. Failed or cancelled exports,
+"edit only" files, files that changed since, and anything outside the watch folder are kept.
 """
 from __future__ import annotations
 
@@ -24,20 +29,22 @@ DEFAULT_WATCH = {
     "recursive": False,
     "out_root": None,        # an output root, e.g. "NAS"
     "out_folder": "",        # e.g. "Auto exports"
-    "photos": "instagram",   # instagram | full | skip
+    "photos": "instagram",   # instagram | full | both (instagram + full) | skip
     "videos": "appletv",     # appletv | full | skip
     "auto_level": True,
     "auto_exposure": True,
     "interval": 30,          # seconds between scans
     "process_existing": False,
+    "delete_originals": False,  # delete each picked-up file once its export is done
 }
-PHOTO_ACTIONS = ("instagram", "full", "skip")
+PHOTO_ACTIONS = ("instagram", "full", "both", "skip")
 VIDEO_ACTIONS = ("appletv", "full", "skip")
 
 
 def normalize_watch(w: dict | None) -> dict:
     o = {**DEFAULT_WATCH, **{k: v for k, v in (w or {}).items() if k in DEFAULT_WATCH}}
-    for k in ("enabled", "recursive", "auto_level", "auto_exposure", "process_existing"):
+    for k in ("enabled", "recursive", "auto_level", "auto_exposure", "process_existing",
+              "delete_originals"):
         o[k] = bool(o[k])
     o["photos"] = o["photos"] if o["photos"] in PHOTO_ACTIONS else "instagram"
     o["videos"] = o["videos"] if o["videos"] in VIDEO_ACTIONS else "appletv"
@@ -51,8 +58,9 @@ def normalize_watch(w: dict | None) -> dict:
 
 
 class Watcher:
-    def __init__(self, cfg, lib, get_settings, submit_export, export_dest):
+    def __init__(self, cfg, lib, get_settings, submit_export, export_dest, get_job=lambda jid: None):
         self.cfg, self.lib = cfg, lib
+        self.get_job = get_job                  # job id -> public job dict, or None if unknown
         self.get_settings = get_settings
         self.submit_export, self.export_dest = submit_export, export_dest
         self.state_file = cfg.data_dir / "watch_state.json"
@@ -133,6 +141,7 @@ class Watcher:
         done = 0
         with self._lock:
             self.status["last_scan"] = time.time()
+            self.cleanup(w)
             waiting = 0
             for p in self._files(w):
                 key = str(p)
@@ -174,14 +183,66 @@ class Watcher:
         if action == "skip":
             self.lib.set_edit(item["id"], edit)
             return {"item": item["id"], "action": "edited only"}
-        recipe = recipes.resolve(action, item, edit)
-        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
+        # "both": an Instagram copy plus a full-quality JPEG; the library keeps the full edit.
+        wanted = ["instagram", "full"] if action == "both" else [action]
         base = self.get_settings()["export"]
-        opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
-                                      "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
-        dest = self.export_dest(opts)
-        job = self.submit_export(item, edit, opts, dest, carousel=recipe == "carousel")
-        return {"item": item["id"], "action": recipe, "job": job["id"]}
+        exports = []
+        for name in reversed(wanted):  # last one's edit is what the library keeps
+            recipe = recipes.resolve(name, item, edit)
+            r_edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
+            opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
+                                          "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
+            dest = self.export_dest(opts)
+            job = self.submit_export(item, r_edit, opts, dest, carousel=recipe == "carousel")
+            exports.append((recipe, job["id"]))
+        exports.reverse()
+        out = {"item": item["id"], "action": " + ".join(r for r, _ in exports),
+               "job": exports[0][1], "jobs": [j for _, j in exports]}
+        if w["delete_originals"]:
+            out["delete_after"] = True
+        return out
+
+    def cleanup(self, w: dict) -> int:
+        """Delete picked-up files whose export finished (see module doc). Returns how many."""
+        base = self.folder(w).resolve()
+        removed = 0
+        for key, entry in self.seen.items():
+            if not entry.get("delete_after") or "deleted" in entry or "kept" in entry:
+                continue
+            path = Path(key)
+            if not path.resolve().is_relative_to(base):
+                continue  # watch folder changed since: leave it alone
+            found = [self.get_job(j) for j in entry.get("jobs") or [entry.get("job")]]
+            bad = next((j for j in found if j and j["status"] not in ("queued", "running", "done")), None)
+            if None in found:
+                entry["kept"] = "export didn't finish before the app restarted"
+            elif any(j["status"] in ("queued", "running") for j in found):
+                continue
+            elif bad or not all(j.get("output") and Path(j["output"]).exists() for j in found):
+                job = bad or found[0]
+                entry["kept"] = f"export {job['status']}" + (f": {job['error']}" if job.get("error") else "")
+            else:
+                try:
+                    st = path.stat()
+                    if (st.st_size, st.st_mtime) != (entry["size"], entry["mtime"]):
+                        entry["kept"] = "file changed after it was picked up"
+                    else:
+                        path.unlink()
+                        entry["deleted"] = time.time()
+                        removed += 1
+                        try:
+                            self.lib.delete(entry["item"])
+                        except (KeyError, OSError):
+                            pass
+                except FileNotFoundError:
+                    entry["deleted"] = time.time()  # already gone
+                except OSError as exc:
+                    entry["kept"] = f"couldn't delete: {exc.strerror or exc}"
+            if "kept" in entry:
+                self._error(f"{path.name}: original kept ({entry['kept']})")
+        if removed or any("kept" in e or "deleted" in e for e in self.seen.values()):
+            self._save()
+        return removed
 
     def _error(self, msg: str) -> None:
         self.status["errors"] = ([{"at": time.time(), "message": msg}] + self.status["errors"])[:20]

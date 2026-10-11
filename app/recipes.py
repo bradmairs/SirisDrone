@@ -119,4 +119,6 @@ def auto_edit(item: dict, edit: dict, source, horizon: bool = True, exposure: bo
             edit["straighten"] = angle
     if exposure:
         edit["grade"]["exposure"] = analysis.auto_exposure(source, edit)
+    if edit["stamp"]["color"].lower() in ("#000000", "#ffffff"):
+        edit["stamp"]["color"] = "auto"  # black or white, whichever stands out on this shot
     return normalize_edit(edit)
