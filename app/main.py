@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import analysis, geo, gpu, grading, jobs, recipes, render, video
+from . import __version__
 from .playback import Playback
 from .config import DEFAULT_STAMP, STATIC_DIR, Config, resolve_in_root
 from .edits import DEFAULT_EDIT, normalize_edit
@@ -32,7 +33,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     lib = Library(cfg.media_dir)
     queue = jobs.JobQueue()
     playback = Playback()
-    app = FastAPI(title="SirisDrone Studio", docs_url="/api/docs")
+    app = FastAPI(title="SirisDrone Studio", version=__version__, docs_url="/api/docs")
     app.state.cfg, app.state.lib, app.state.jobs = cfg, lib, queue
     app.state.playback = playback
 
@@ -112,6 +113,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "default_edit": DEFAULT_EDIT,
             "neutral_grade": grading.DEFAULT_GRADE,
             "codecs": {k: v[0] for k, v in video.CODECS.items()},
+            "version": __version__,
             "recipes": {k: {kk: r[kk] for kk in ("label", "kinds", "help")} for k, r in recipes.RECIPES.items()},
             "gpu": gpu.detect(),
             "photo_formats": list(render.PHOTO_FORMATS),
