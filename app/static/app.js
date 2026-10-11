@@ -417,6 +417,7 @@ function buildStampSection() {
   st.append(slider("stamp.opacity", "Opacity", 0, 100));
   st.append(slider("stamp.shadow", "Shadow", 0, 100));
   const sw = el(`<div class="field"><label>Colour</label><div class="swatches">
+      <button class="swatch swatch-auto" data-c="auto" title="Auto: black or white, whichever stands out against the background">A</button>
       <button class="swatch" data-c="#ffffff" style="background:#fff" title="White"></button>
       <button class="swatch" data-c="#000000" style="background:#000" title="Black"></button>
       <button class="swatch" data-c="#d4af37" style="background:#d4af37" title="Gold"></button>
@@ -441,7 +442,7 @@ function buildStampSection() {
       $("#stampOn").checked = s.enabled;
       $$(".pos-grid button").forEach((b) => b.classList.toggle("on", b.dataset.p === s.position));
       $$("[data-sec=stamp] .swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === s.color));
-      $("#stampColor").value = s.color;
+      if (s.color !== "auto") $("#stampColor").value = s.color;
       const img = $("#stampImg");
       const src = `/api/stamp?v=${state.stampVersion}`;
       if (img.getAttribute("src") !== src) img.src = src;

@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 
 from . import grading
 from .edits import Geometry, normalize_edit, plan_geometry
-from .stamp import composite, render_stamp
+from .stamp import composite, render_stamp, resolve_color
 
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".dng"}
 RAW_EXTS = {".dng"}
@@ -276,7 +276,7 @@ def render(src, edit: dict, *, long_edge: int | None = None, mode: str = "final"
         apply_vignette(rgb, edit["vignette"])
         apply_sharpen(rgb, edit["sharpen"])
         if edit["stamp"]["enabled"] and stamp_mask is not None:
-            stamp, x, y = render_stamp(stamp_mask, out_w, out_h, edit["stamp"])
+            stamp, x, y = render_stamp(stamp_mask, out_w, out_h, resolve_color(rgb, stamp_mask, edit["stamp"]))
             composite(rgb, stamp, x, y)
     return rgb
 
@@ -305,7 +305,8 @@ def render_carousel(src, edit: dict, stamp_mask=None) -> list[np.ndarray]:
     strip = rgb[y0:y0 + SLIDE_H, x0:x0 + n * SLIDE_W]
     slides = [np.ascontiguousarray(strip[:, i * SLIDE_W:(i + 1) * SLIDE_W]) for i in range(n)]
     if edit["stamp"]["enabled"] and stamp_mask is not None:
-        st, x, y = render_stamp(stamp_mask, SLIDE_W, SLIDE_H, edit["stamp"])
+        s = resolve_color(slides[-1], stamp_mask, edit["stamp"])
+        st, x, y = render_stamp(stamp_mask, SLIDE_W, SLIDE_H, s)
         composite(slides[-1], st, x, y)
     return slides
 
