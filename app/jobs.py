@@ -274,6 +274,8 @@ def export_video(src_path: Path, meta: dict, name: str, edit: dict, opts: dict, 
     def progress(p):
         job.progress = p
 
+    edit = video.resolve_stamp(src_path, meta, edit, stamp_mask)
+
     def attempt(use_gpu: bool) -> None:
         with tempfile.TemporaryDirectory(prefix="siris-") as work:
             _, pix, _ = video.encoder_settings(codec, opts["video_quality"], use_gpu)

@@ -87,6 +87,8 @@ class Playback:
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(f".{out.name}.part")
         try:
+            edit = video.resolve_stamp(src, item, edit, mask)
+
             def attempt(use_gpu: bool) -> None:
                 with tempfile.TemporaryDirectory(prefix="siris-play-") as work:
                     _, pix, _ = video.encoder_settings("h264", "standard", use_gpu, fast=True)

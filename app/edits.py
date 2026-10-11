@@ -85,7 +85,7 @@ def normalize_edit(edit: dict | None) -> dict:
     s = {**DEFAULT_EDIT["stamp"], **(edit.get("stamp") or {})}
     pos = s.get("position")
     color = str(s.get("color") or DEFAULT_EDIT["stamp"]["color"])
-    if not (len(color) == 7 and color.startswith("#")):
+    if color != "auto" and not (len(color) == 7 and color.startswith("#")):
         color = DEFAULT_EDIT["stamp"]["color"]
     e["stamp"] = {
         "enabled": bool(s.get("enabled")),
