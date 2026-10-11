@@ -1486,6 +1486,7 @@ async function openAutomation() {
   $("#wPhotos").value = w.photos; $("#wVideos").value = w.videos;
   $("#wLevel").checked = w.auto_level; $("#wExposure").checked = w.auto_exposure;
   $("#wRecursive").checked = w.recursive; $("#wExisting").checked = w.process_existing;
+  $("#wDelete").checked = w.delete_originals;
   renderWatchLog(status);
   $("#autoDlg").showModal();
 }
@@ -1495,7 +1496,7 @@ function renderWatchLog(status) {
   const when = (t) => new Date(t * 1000).toLocaleTimeString();
   const rows = [
     ...status.errors.map((e) => `<li><span class="err">${when(e.at)} · ${escapeHtml(e.message)}</span></li>`),
-    ...status.recent.map((r) => `<li><div class="top"><span class="name">${escapeHtml(r.name)}</span><span class="st ${r.error ? "error" : "done"}">${escapeHtml(r.error ? "failed" : (r.action || ""))}</span></div>${r.error ? `<div class="err">${escapeHtml(r.error)}</div>` : ""}</li>`),
+    ...status.recent.map((r) => `<li><div class="top"><span class="name">${escapeHtml(r.name)}</span><span class="st ${r.error ? "error" : "done"}">${escapeHtml(r.error ? "failed" : (r.action || "") + (r.delete_after ? " · original deleted when done" : ""))}</span></div>${r.error ? `<div class="err">${escapeHtml(r.error)}</div>` : ""}</li>`),
   ];
   log.innerHTML = rows.length ? rows.join("") : `<li class="empty">${status.last_scan ? `Last checked ${when(status.last_scan)} – nothing new` : "Not running yet"}${status.waiting ? ` · ${status.waiting} file(s) still copying` : ""}</li>`;
   $("#autoDot").hidden = !state.cfg.settings.watch?.enabled;
@@ -1511,7 +1512,7 @@ function initAutomation() {
         out_root: $("#wOutRoot").value, out_folder: $("#wOutFolder").value.trim(),
         photos: $("#wPhotos").value, videos: $("#wVideos").value, auto_level: $("#wLevel").checked,
         auto_exposure: $("#wExposure").checked, recursive: $("#wRecursive").checked,
-        process_existing: $("#wExisting").checked,
+        process_existing: $("#wExisting").checked, delete_originals: $("#wDelete").checked,
       });
       state.cfg.settings.watch = r.settings;
       renderWatchLog(r.status);
