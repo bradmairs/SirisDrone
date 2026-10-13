@@ -1529,6 +1529,7 @@ async function openAutomation() {
   $("#wLevel").checked = w.auto_level; $("#wExposure").checked = w.auto_exposure;
   $("#wRecursive").checked = w.recursive; $("#wExisting").checked = w.process_existing;
   $("#wDelete").checked = w.delete_originals;
+  $("#wTrips").checked = w.trip_folders;
   renderWatchLog(status);
   $("#autoDlg").showModal();
 }
@@ -1555,6 +1556,7 @@ function initAutomation() {
         photos: $("#wPhotos").value, videos: $("#wVideos").value, auto_level: $("#wLevel").checked,
         auto_exposure: $("#wExposure").checked, recursive: $("#wRecursive").checked,
         process_existing: $("#wExisting").checked, delete_originals: $("#wDelete").checked,
+        trip_folders: $("#wTrips").checked,
       });
       state.cfg.settings.watch = r.settings;
       renderWatchLog(r.status);

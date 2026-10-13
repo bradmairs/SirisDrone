@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 
 from PIL import Image
@@ -35,9 +36,9 @@ def test_watch_folder_auto_edits_and_exports(client, env, tmp_path):
     assert all(j["status"] == "done" for j in jobs), jobs
 
     auto = out / "Auto"
-    w_, h_ = Image.open(auto / "DJI_0500_BRM.jpg").size  # full resolution (levelling zooms in a little)
+    w_, h_ = Image.open(next(auto.rglob("DJI_0500_BRM.jpg"))).size  # full resolution (levelling zooms in a little)
     assert w_ > 1400 and abs(w_ / h_ - 4 / 3) < 0.01
-    vid = next(auto.glob("*DJI_0502 ATV.mp4"))
+    vid = next(auto.rglob("*DJI_0502 ATV.mp4"))
     s = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", str(vid)],
                                   capture_output=True, text=True).stdout)["streams"][0]
     assert (s["width"], s["height"], s["codec_name"]) == (3840, 2160, "hevc")
@@ -74,7 +75,7 @@ def test_watch_folder_deletes_originals_once_exported(client, env):
     assert (inbox / "DJI_0600.JPG").exists()                       # not until the export is done
     client.app_state.jobs.wait_idle(300)
     w.scan()
-    assert next((out / "Auto").glob("*DJI_0600*.jpg")).exists()
+    assert next((out / "Auto").rglob("*DJI_0600*.jpg")).exists()
     assert sorted(p.name for p in inbox.iterdir()) == ["DJI_0601.MP4", "OLD_0001.JPG"]
     assert "DJI_0600.JPG" not in [i["name"] for i in client.get("/api/media").json()]
 
@@ -133,4 +134,23 @@ def test_watch_folder_uses_jpeg_and_skips_its_dng_twin(client, env):
     w.scan()  # JPEG exported and deleted
     w.scan()  # then its DNG twin goes too
     assert not any(inbox.iterdir())
-    assert len(list((out / "T").glob("DJI_0800*.jpg"))) == 1
+    assert len(list((out / "T").rglob("DJI_0800*.jpg"))) == 1
+
+
+def test_watch_folder_exports_into_trip_folders(client, env):
+    _, out, raw = env
+    inbox = raw / "Trips"
+    trip = inbox / "2026-04-03_Philip Island - Australia"
+    (trip / "JPEG").mkdir(parents=True)
+    w = client.app_state.watcher
+    w.min_age = 0
+    r = client.put("/api/watch", json={"enabled": True, "root": "Footage", "folder": "Trips", "recursive": True,
+                                       "out_root": "NAS", "out_folder": "", "interval": 3600, "photos": "full"})
+    assert r.json()["settings"]["trip_folders"] is True
+    horizon_scene(trip / "JPEG" / "DJI_0611.JPG", 0, 800, 600)       # JPEG/ level left out
+    horizon_scene(inbox / "DJI_0612.JPG", 0, 800, 600)               # loose: folder by date
+    w.scan(); w.scan()
+    client.app_state.jobs.wait_idle(300)
+    assert (out / "2026-04-03_Philip Island - Australia" / "DJI_0611_BRM.jpg").exists()
+    loose = next(out.rglob("DJI_0612_BRM.jpg"))
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", loose.parent.name)

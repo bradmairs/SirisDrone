@@ -3,6 +3,15 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.25 – 2026-10-13
+
+- **A folder per trip:** the automation now exports into a folder per trip. Copy a trip folder
+  (e.g. `2026-04-03_Philip Island - Australia`, with or without `JPEG/`, `DNG/`, `Videos/`
+  inside) into the watch folder and its edits go to the same-named folder in the export folder;
+  files dropped in loose are grouped by the day they were taken (`2026-04-03`). DJI reuses file
+  numbers across trips, so this also stops names clashing. *A folder per trip* in Automation
+  turns it off.
+
 ## 1.15 – 2026-10-13
 
 - **Fix:** pressing *Clear finished* in the Exports panel while the watch folder was working made
