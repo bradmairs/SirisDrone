@@ -3,6 +3,12 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.15 – 2026-10-13
+
+- **Fix:** pressing *Clear finished* in the Exports panel while the watch folder was working made
+  finished exports look lost, so their originals were kept with "export didn't finish before
+  the app restarted". Cleared jobs are now still known to the watch folder.
+
 ## 1.14 – 2026-10-13
 
 - **Location lookup:** also uses OpenStreetMap's district (e.g. *Summerlands* on the west of
