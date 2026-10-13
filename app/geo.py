@@ -104,7 +104,44 @@ def gimbal_pitch(path: Path) -> float | None:
 
 
 def gps_for_video(path: Path, meta: dict) -> tuple[float, float] | None:
-    return gps_from_iso6709(meta.get("location")) or gps_from_srt(Path(path))
+    return gps_from_iso6709(meta.get("location")) or gps_from_srt(Path(path)) or gps_from_nearby_photo(Path(path))
+
+
+_DJI_NUMBER = re.compile(r"DJI_(\d+)", re.I)
+_NEARBY_LIMIT = 50  # file numbers: further away is probably another flight
+
+
+def gps_from_nearby_photo(path: Path) -> tuple[float, float] | None:
+    """GPS of the photo taken closest to a video (by DJI file number) in the same folder, or
+    in sibling folders when the video sits in a Videos/ folder next to JPEG/ and DNG/. For
+    videos that carry no GPS themselves (no metadata location and no .SRT file)."""
+    m = _DJI_NUMBER.search(path.stem)
+    if not m:
+        return None
+    number = int(m.group(1))
+    dirs = [path.parent]
+    if path.parent.name.lower() in ("videos", "video", "mp4", "movies"):
+        dirs += [d for d in path.parent.parent.iterdir() if d.is_dir() and d != path.parent]
+        dirs.append(path.parent.parent)
+    photos = []
+    for d in dirs:
+        try:
+            entries = list(d.iterdir())
+        except OSError:
+            continue
+        for p in entries:
+            pm = _DJI_NUMBER.search(p.stem)
+            if pm and p.suffix.lower() in (".jpg", ".jpeg", ".dng") and abs(int(pm.group(1)) - number) <= _NEARBY_LIMIT:
+                photos.append((abs(int(pm.group(1)) - number), p.suffix.lower() == ".dng", p))
+    for _, _, p in sorted(photos):
+        try:
+            with Image.open(p) as im:
+                gps = gps_from_exif(im.getexif().tobytes())
+        except Exception:
+            continue
+        if gps:
+            return gps
+    return None
 
 
 # ---------------------------------------------------------------------------

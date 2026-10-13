@@ -88,3 +88,18 @@ def test_location_style_bar_bold_town_lighter_country():
     assert 255 in values and round(255 * 0.7) in values         # bold town, lighter country
     assert location_mask("Cape Woolamai, Australia").height == location_mask("Wye, UK").height
     assert location_mask("Somewhere") is not None              # no country is fine too
+
+
+def test_video_without_gps_borrows_nearest_photo(tmp_path):
+    trip = tmp_path / "2026-04-03_Philip Island"
+    (trip / "JPEG").mkdir(parents=True)
+    (trip / "Videos").mkdir()
+    horizon_scene(trip / "JPEG" / "DJI_0607.JPG", 0, 400, 300, gps=(-38.52, 145.30))
+    horizon_scene(trip / "JPEG" / "DJI_0700.JPG", 0, 400, 300, gps=(-37.00, 144.00))
+    vid = trip / "Videos" / "DJI_0608.MP4"
+    vid.write_bytes(b"no gps in here")
+    gps = geo.gps_for_video(vid, {})
+    assert gps and abs(gps[0] + 38.52) < 0.01 and abs(gps[1] - 145.30) < 0.01
+    lone = tmp_path / "DJI_0900.MP4"
+    lone.write_bytes(b"x")
+    assert geo.gps_for_video(lone, {}) is None
