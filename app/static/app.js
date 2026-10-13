@@ -473,6 +473,7 @@ function buildLocationSection() {
   ls.append(txt);
   ls.append(slider("location.size", "Size", 0.5, 8, 0.1));
   ls.append(slider("location.margin", "Margin", 0, 20, 0.5));
+  ls.append(slider("location.shadow", "Shadow", 0, 100));
   const sw = el(`<div class="field"><label>Colour</label><div class="swatches">
       <button class="swatch swatch-auto" data-c="auto" title="Auto: black or white, whichever stands out against the background">A</button>
       <button class="swatch" data-c="#ffffff" style="background:#fff" title="White"></button>

@@ -3,6 +3,13 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.11 – 2026-10-13
+
+- **Location stamp:** a soft halo in the opposite colour (Shadow 30, adjustable) so the thin text
+  stays readable over busy backgrounds like surf.
+- **Fix:** the library's All / Photos / Videos tabs are no longer squashed in a narrow panel;
+  "Select all" moves to its own line instead.
+
 ## 1.1 – 2026-10-13
 
 - **Location stamp:** "City, Country" (e.g. "Cowes, Australia") in the bottom-left of photos and
