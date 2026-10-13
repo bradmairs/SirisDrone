@@ -481,8 +481,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     # -- watch folder --------------------------------------------------------------
     def get_job(jid: str | None) -> dict | None:
-        job = queue.jobs.get(jid) if jid else None
-        return job.public() if job else None
+        return queue.get(jid)
 
     watcher = Watcher(cfg, lib, load_settings, submit_export, export_dest, get_job)
     app.state.watcher = watcher

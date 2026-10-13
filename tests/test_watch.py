@@ -78,6 +78,15 @@ def test_watch_folder_deletes_originals_once_exported(client, env):
     assert sorted(p.name for p in inbox.iterdir()) == ["DJI_0601.MP4", "OLD_0001.JPG"]
     assert "DJI_0600.JPG" not in [i["name"] for i in client.get("/api/media").json()]
 
+    # "Clear finished" in the Exports panel must not make a finished export look lost.
+    horizon_scene(inbox / "DJI_0603.JPG", 0, 800, 600)
+    w.scan(); w.scan()
+    client.app_state.jobs.wait_idle(300)
+    assert client.delete("/api/jobs").status_code == 200
+    w.scan()
+    assert not (inbox / "DJI_0603.JPG").exists()
+    assert "kept" not in w.seen[str(inbox / "DJI_0603.JPG")]
+
     # A failed export keeps the file.
     horizon_scene(inbox / "DJI_0602.JPG", 0, 800, 600)
     w.scan(); w.scan()

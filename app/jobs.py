@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 import queue
 import re
 import tempfile
@@ -139,6 +140,9 @@ class Job:
 class JobQueue:
     def __init__(self):
         self.jobs: dict[str, Job] = {}
+        # Jobs cleared from the Exports list are kept here (most recent 1000) so the watch
+        # folder can still confirm a finished export before deleting the original.
+        self._cleared: OrderedDict[str, Job] = OrderedDict()
         self._q: queue.Queue[Job] = queue.Queue()
         self._lock = threading.Lock()
         threading.Thread(target=self._worker, daemon=True, name="exporter").start()
@@ -163,7 +167,15 @@ class JobQueue:
     def clear_finished(self) -> None:
         with self._lock:
             for jid in [j.id for j in self.jobs.values() if j.status in ("done", "error", "cancelled")]:
-                del self.jobs[jid]
+                self._cleared[jid] = self.jobs.pop(jid)
+            while len(self._cleared) > 1000:
+                self._cleared.popitem(last=False)
+
+    def get(self, jid: str | None) -> dict | None:
+        """A job by id, including ones cleared from the list; None if this app never ran it."""
+        with self._lock:
+            job = self.jobs.get(jid) or self._cleared.get(jid) if jid else None
+        return job.public() if job else None
 
     def wait_idle(self, timeout: float = 120) -> None:
         end = time.time() + timeout
