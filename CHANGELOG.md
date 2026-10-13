@@ -3,6 +3,11 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.12 – 2026-10-13
+
+- **Location stamp style:** a thin accent bar, the town in bold spaced capitals and the country
+  lighter (e.g. "| CAPE WOOLAMAI  AUSTRALIA"), scaled so it looks the same size as before.
+
 ## 1.11 – 2026-10-13
 
 - **Location stamp:** a soft halo in the opposite colour (Shadow 30, adjustable) so the thin text

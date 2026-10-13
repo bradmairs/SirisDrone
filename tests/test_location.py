@@ -78,3 +78,13 @@ def test_video_graph_has_location_overlay(tmp_path):
     assert "[location]" in g["filter"] and (tmp_path / "location.png").exists()
     edit["location"]["enabled"] = False
     assert "[location]" not in video.build_graph(meta, edit, tmp_path, MASK)["filter"]
+
+
+def test_location_style_bar_bold_town_lighter_country():
+    m = np.asarray(location_mask("Cape Woolamai, Australia"))
+    left = m[:, :40]
+    assert (left == 255).sum() > 200                            # accent bar at the start
+    values = set(np.unique(m).tolist())
+    assert 255 in values and round(255 * 0.7) in values         # bold town, lighter country
+    assert location_mask("Cape Woolamai, Australia").height == location_mask("Wye, UK").height
+    assert location_mask("Somewhere") is not None              # no country is fine too
