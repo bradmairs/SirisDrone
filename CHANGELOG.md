@@ -3,6 +3,12 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.14 – 2026-10-13
+
+- **Location lookup:** also uses OpenStreetMap's district (e.g. *Summerlands* on the west of
+  Phillip Island, which came out as just "Victoria") and, when no town is found, the island
+  name before the state.
+
 ## 1.13 – 2026-10-13
 
 - **Location for videos without GPS:** when a video has no location in its metadata or a DJI
