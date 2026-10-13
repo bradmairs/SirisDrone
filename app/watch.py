@@ -18,6 +18,8 @@ import time
 import traceback
 from pathlib import Path
 
+from PIL import Image
+
 from . import jobs, recipes
 from .config import resolve_in_root
 from .library import media_kind
@@ -36,6 +38,7 @@ DEFAULT_WATCH = {
     "interval": 30,          # seconds between scans
     "process_existing": False,
     "delete_originals": False,  # delete each picked-up file once its export is done
+    "trip_folders": True,     # export into a folder per trip (see export_subfolder)
 }
 PHOTO_ACTIONS = ("full", "skip")
 VIDEO_ACTIONS = ("appletv", "full", "skip")
@@ -44,7 +47,7 @@ VIDEO_ACTIONS = ("appletv", "full", "skip")
 def normalize_watch(w: dict | None) -> dict:
     o = {**DEFAULT_WATCH, **{k: v for k, v in (w or {}).items() if k in DEFAULT_WATCH}}
     for k in ("enabled", "recursive", "auto_level", "auto_exposure", "process_existing",
-              "delete_originals"):
+              "delete_originals", "trip_folders"):
         o[k] = bool(o[k])
     o["photos"] = "skip" if o["photos"] == "skip" else "full"  # Instagram options were removed in 1.1
     o["videos"] = o["videos"] if o["videos"] in VIDEO_ACTIONS else "appletv"
@@ -202,14 +205,40 @@ class Watcher:
         recipe = action
         edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
         base = self.get_settings()["export"]
+        folder = w["out_folder"]
+        if w["trip_folders"]:
+            folder = "/".join(p for p in (folder, self.export_subfolder(path, w, item)) if p)
         opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
-                                      "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
+                                      "folder": folder, **recipes.RECIPES[recipe]["options"]})
         dest = self.export_dest(opts)
         job = self.submit_export(item, edit, opts, dest)
         out = {"item": item["id"], "action": recipe, "job": job["id"], "jobs": [job["id"]]}
         if w["delete_originals"]:
             out["delete_after"] = True
         return out
+
+    _TYPE_FOLDERS = ("dng", "jpeg", "jpg", "raw", "videos", "video", "mp4", "photos")
+
+    def export_subfolder(self, path: Path, w: dict, item: dict) -> str:
+        """Folder (inside the export folder) for one trip: the file's folder inside the watch
+        folder, e.g. "2026-04-03_Philip Island - Australia" (a DNG/, JPEG/ or Videos/ level is
+        left out so a trip's photos and videos end up together). Files dropped straight into
+        the watch folder go into a folder named by the day they were taken, e.g. "2026-04-03"."""
+        try:
+            parts = list(path.parent.relative_to(self.folder(w)).parts)
+        except ValueError:
+            parts = []
+        while parts and parts[-1].lower() in self._TYPE_FOLDERS:
+            parts.pop()
+        if parts:
+            return "/".join(parts)
+        if item["kind"] == "video":
+            return jobs.capture_date(creation_time=item.get("creation_time"))
+        try:
+            with Image.open(path) as im:
+                return jobs.capture_date(im.getexif().tobytes())
+        except Exception:
+            return jobs.capture_date()
 
     def cleanup(self, w: dict) -> int:
         """Delete picked-up files whose export finished (see module doc). Returns how many."""
