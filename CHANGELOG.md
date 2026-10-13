@@ -3,6 +3,12 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.13 – 2026-10-13
+
+- **Location for videos without GPS:** when a video has no location in its metadata or a DJI
+  `.SRT` file, it uses the GPS of the nearest-numbered photo from the same flight (same folder,
+  or `JPEG/`/`DNG/` next to a `Videos/` folder, within 50 file numbers).
+
 ## 1.12 – 2026-10-13
 
 - **Location stamp style:** a thin accent bar, the town in bold spaced capitals and the country
