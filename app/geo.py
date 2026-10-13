@@ -183,8 +183,9 @@ def _lookup(lat: float, lon: float) -> str:
 
 # Nearest named place first: drone shots are mostly outside big cities, and "Christmas Hills"
 # says more than "Melbourne". County/state only when no place is found nearby.
-_CITY_KEYS = ("town", "village", "suburb", "hamlet", "city", "municipality")  # not "locality": often a park
-_FALLBACK_KEYS = ("county", "state")
+_CITY_KEYS = ("town", "village", "suburb", "city_district", "hamlet", "city",
+              "municipality")  # not "locality": often a park
+_FALLBACK_KEYS = ("island", "county", "state")  # "Phillip Island" beats "Victoria"
 # Over the sea or a beach Nominatim often has only the state; nudging the point towards land
 # finds the nearest town (2 km, then 5 km away).
 _NUDGES = ((0, 0), (0.02, 0), (-0.02, 0), (0, 0.02), (0, -0.02),

@@ -31,6 +31,12 @@ def test_city_country_from_gps(monkeypatch, tmp_path):
     assert geo.city_country((-38.60, 142.70)) == "Peterborough, Australia" and len(seen) == 3
     monkeypatch.setattr(geo, "_lookup_address", lambda lat, lon: {"state": "Victoria", "country": "Australia"})
     assert geo.city_country((-39.0, 143.0)) == "Victoria, Australia"  # nothing nearby: the state
+    monkeypatch.setattr(geo, "_lookup_address", lambda lat, lon: {
+        "road": "Ventnor Road", "city_district": "Summerlands", "state": "Victoria", "country": "Australia"})
+    assert geo.city_country((-38.517, 145.115)) == "Summerlands, Australia"
+    monkeypatch.setattr(geo, "_lookup_address", lambda lat, lon: {
+        "island": "Phillip Island", "state": "Victoria", "country": "Australia"})
+    assert geo.city_country((-38.49, 145.20)) == "Phillip Island, Australia"
 
 
 def test_location_text_is_smaller_than_the_brm_stamp():
