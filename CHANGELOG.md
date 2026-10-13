@@ -3,6 +3,11 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.26 – 2026-10-13
+
+- **Fix:** locations looked up before 1.14 were cached, so places that 1.14 now names (e.g.
+  *Summerlands* instead of "Victoria") kept the old answer. Those are looked up again.
+
 ## 1.25 – 2026-10-13
 
 - **A folder per trip:** the automation now exports into a folder per trip. Copy a trip folder
