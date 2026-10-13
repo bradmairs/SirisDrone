@@ -37,10 +37,12 @@ def test_location_text_is_smaller_than_the_brm_stamp():
     edit = normalize_edit({**DEFAULT_EDIT, "location": {"text": "Cowes, Australia"}})
     loc = edit["location"]
     m = location_mask(loc["text"])
-    text_img, x, y = render_stamp(m, 1600, 1200, location_settings(loc, m))
+    text_img, x, y = render_stamp(m, 1600, 1200, {**location_settings(loc, m), "shadow": 0})
     brm_img, bx, by = render_stamp(MASK, 1600, 1200, edit["stamp"])
     assert text_img.height < brm_img.height * 0.65
     assert x < 100 and y > 1000 and bx > 1000                   # bottom-left vs bottom-right
+    halo = np.asarray(render_stamp(m, 1600, 1200, location_settings(loc, m))[0])
+    assert loc["shadow"] > 0 and halo[..., 3].max() > 200 and halo[..., :3].max() == 255  # white halo
 
 
 def test_location_drawn_bottom_left_with_contrast():

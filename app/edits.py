@@ -48,6 +48,7 @@ DEFAULT_EDIT: dict = {
         "margin": 2.7,    # % of the short edge, same as the BRM stamp
         "opacity": 95,
         "color": "auto",
+        "shadow": 30,     # soft halo in the opposite colour so thin text reads over busy surf
     },
     "video": {
         "trim_start": 0.0,
@@ -118,6 +119,7 @@ def normalize_edit(edit: dict | None) -> dict:
         "margin": _num(lo.get("margin"), 0, 20, 2.7),
         "opacity": _num(lo.get("opacity"), 0, 100, 95),
         "color": lcol if lcol == "auto" or (len(lcol) == 7 and lcol.startswith("#")) else "auto",
+        "shadow": _num(lo.get("shadow"), 0, 100, 30),
     }
 
     v = {**DEFAULT_EDIT["video"], **(edit.get("video") or {})}

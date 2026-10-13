@@ -46,7 +46,8 @@ def location_mask(text: str) -> Image.Image | None:
 def location_settings(loc: dict, mask: Image.Image) -> dict:
     """The location's settings in render_stamp() terms (which sizes by width)."""
     return {"enabled": True, "position": loc["position"], "size": loc["size"] * mask.width / mask.height,
-            "margin": loc["margin"], "opacity": loc["opacity"], "color": loc["color"], "shadow": 0}
+            "margin": loc["margin"], "opacity": loc["opacity"], "color": loc["color"],
+            "shadow": loc.get("shadow", 0)}
 
 
 AUTO = "auto"  # stamp colour chosen per image: black or white, whichever contrasts more
