@@ -84,7 +84,11 @@ button, input, select { font: inherit; color: inherit; }
 .thumb .kind + .edited { right: auto; left: 28px; }
 .lib-empty { position: absolute; inset: 50px 10px auto; text-align: center; color: var(--muted); border: 1.5px dashed var(--line); border-radius: var(--radius); padding: 28px 10px; }
 .lib-empty p { margin: 4px 0; }
-.lib-foot { border-top: 1px solid var(--line); padding: 8px 10px; display: flex; gap: 6px; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.lib-foot { border-top: 1px solid var(--line); padding: 8px 10px; display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; font-size: 12px; color: var(--muted); min-width: 0; }
+/* The count gets its own line; the actions wrap below it instead of spilling into the viewer. */
+.lib-foot #selCount { flex: 1 0 100%; }
+.lib-foot .link { white-space: nowrap; padding-left: 0; padding-right: 6px; }
+.lib-foot .link.danger { margin-left: auto; }
 .upload-progress { padding: 0 10px 8px; font-size: 11px; color: var(--muted); }
 .bar { height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; margin-bottom: 4px; }
 .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }

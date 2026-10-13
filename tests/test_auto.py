@@ -46,58 +46,21 @@ def test_auto_exposure_brightens_dark_and_respects_highlights(tmp_path):
     assert abs(analysis.auto_exposure(Image.fromarray(src.astype(np.uint8)), {"grade": {}})) <= 0.3
 
 
-def test_auto_endpoint_and_instagram_quick_export(client, env, tmp_path, monkeypatch):
+def test_auto_endpoint_and_full_quick_export(client, env, tmp_path, monkeypatch):
     _, out, _ = env
     monkeypatch.setattr(geo, "_lookup", lambda lat, lon: "Wharariki Beach")
     item = upload(client, horizon_scene(tmp_path / "DJI_0100.JPG", 3.0, gps=(-40.5, 172.67)))
     r = client.post(f"/api/media/{item['id']}/auto", json={}).json()
     assert r["horizon_found"] and abs(r["straighten"] + 3.0) <= 0.2 and "exposure" in r
 
-    res = client.post("/api/quick-export", json={"recipe": "instagram", "media_ids": [item["id"]],
-                                                  "root": "NAS", "folder": "insta"}).json()
+    assert client.post("/api/quick-export", json={"recipe": "instagram", "media_ids": [item["id"]]}).status_code == 400
+    res = client.post("/api/quick-export", json={"recipe": "full", "media_ids": [item["id"]],
+                                                  "root": "NAS", "folder": "full"}).json()
     assert res["jobs"] and not res["skipped"]
     client.app_state.jobs.wait_idle()
-    files = list((out / "insta").glob("*.jpg"))
-    assert len(files) == 1, files
-    assert files[0].name.endswith("Wharariki Beach DJI_0100 IG.jpg")
-    im = Image.open(files[0])
-    assert im.width == 1080 and abs(im.width / im.height - 4 / 3) < 0.02  # stays landscape
-    assert 0x8825 not in im.getexif()                       # GPS stripped for social
-    assert client.get(f"/api/media/{item['id']}/edit").json()["aspect"] == "original"
-
-
-def test_instagram_keeps_orientation(client, env, tmp_path):
-    _, out, _ = env
-    cases = {"PORT_0001.JPG": (900, 1600), "WIDE_0002.JPG": (1900, 1000), "SQR_0003.JPG": (1000, 1000)}
-    ids = [upload(client, horizon_scene(tmp_path / n, 0, w=w, h=h))["id"] for n, (w, h) in cases.items()]
-    client.post("/api/quick-export", json={"recipe": "instagram", "media_ids": ids,
-                                           "root": "NAS", "folder": "ig"})
-    client.app_state.jobs.wait_idle()
-    size = {f.name.split(" IG")[0].split(" ")[-1]: Image.open(f).size for f in (out / "ig").glob("*.jpg")}
-    assert size["PORT_0001"] == (1080, 1350)                 # too tall: cropped to 4:5
-    assert size["WIDE_0002"][0] == 1080 and abs(1080 / size["WIDE_0002"][1] - 1.91) < 0.02
-    assert size["SQR_0003"] == (1080, 1080)
-
-
-def test_panorama_becomes_carousel(client, env, tmp_path):
-    _, out, _ = env
-    pano = upload(client, horizon_scene(tmp_path / "PANO_0001.JPG", 0, w=4000, h=1000))
-    client.post("/api/quick-export", json={"recipe": "instagram", "media_ids": [pano["id"]],
-                                           "root": "NAS", "folder": "pano"})
-    client.app_state.jobs.wait_idle()
-    job = client.get("/api/jobs").json()[-1]
-    assert job["kind"] == "carousel" and job["status"] == "done", job
-    slides = sorted((out / "pano").glob("*.jpg"))
-    assert len(slides) == 5                                  # 4:1 pano ≈ 5 × 4:5 slides
-    assert all(Image.open(s).size == (1080, 1350) for s in slides)
-    last = np.asarray(Image.open(slides[-1]), np.float32)
-    first = np.asarray(Image.open(slides[0]), np.float32)
-    corner = (slice(1250, 1330), slice(780, 1060))
-    ink = lambda a: int((a[corner].max(axis=-1) < 40).sum())
-    assert ink(last) > 500 and ink(first) == 0               # black stamp only on the last slide
-    # seamless: the edge columns of neighbouring slides continue each other
-    a, b = np.asarray(Image.open(slides[1]), np.float32), np.asarray(Image.open(slides[2]), np.float32)
-    assert np.abs(a[:, -1] - b[:, 0]).mean() < 6
+    files = list((out / "full").glob("*.jpg"))
+    assert [f.name for f in files] == ["DJI_0100_BRM.jpg"]
+    assert Image.open(files[0]).size == (1600, 1200)
 
 
 def test_apple_tv_quick_export_skips_photos(client, env, tmp_path):

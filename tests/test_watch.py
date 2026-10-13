@@ -23,22 +23,20 @@ def test_watch_folder_auto_edits_and_exports(client, env, tmp_path):
     assert r.json()["skipped_existing"] == 1
 
     horizon_scene(inbox / "DJI_0500.JPG", 3.0, 1600, 1200)       # tilted photo
-    horizon_scene(inbox / "PANO_0501.JPG", 0, 4000, 1000)        # panorama
     make_video(inbox / "DJI_0502.MP4", size="320x180", seconds=1)
     (inbox / "notes.txt").write_text("ignored")
 
     assert w.scan() == 0          # first sighting: wait until the copy has finished
-    assert w.scan() == 3
+    assert w.scan() == 2
     assert w.scan() == 0          # nothing processed twice
     client.app_state.jobs.wait_idle(300)
     jobs = client.get("/api/jobs").json()
-    assert sorted(j["kind"] for j in jobs) == ["carousel", "photo", "video"]
+    assert sorted(j["kind"] for j in jobs) == ["photo", "video"]
     assert all(j["status"] == "done" for j in jobs), jobs
 
     auto = out / "Auto"
-    photo = next(auto.glob("*DJI_0500 IG.jpg"))
-    assert Image.open(photo).width == 1080 and Image.open(photo).height < 1080  # landscape kept
-    assert len(list(auto.glob("*PANO_0501 IG_*.jpg"))) == 5
+    w_, h_ = Image.open(auto / "DJI_0500_BRM.jpg").size  # full resolution (levelling zooms in a little)
+    assert w_ > 1400 and abs(w_ / h_ - 4 / 3) < 0.01
     vid = next(auto.glob("*DJI_0502 ATV.mp4"))
     s = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", str(vid)],
                                   capture_output=True, text=True).stdout)["streams"][0]
@@ -50,9 +48,9 @@ def test_watch_folder_auto_edits_and_exports(client, env, tmp_path):
     assert abs(edit["straighten"] + 3.0) <= 0.2 and edit["aspect"] == "original"
     assert edit["grade"]["blue_sat"] > 0 and edit["stamp"]["enabled"]
     assert sorted(p.name for p in inbox.iterdir()) == ["DJI_0500.JPG", "DJI_0502.MP4", "OLD_0001.JPG",
-                                                       "PANO_0501.JPG", "notes.txt"]
+                                                       "notes.txt"]
     status = client.get("/api/watch").json()["status"]
-    assert status["processed"] == 3 and not status["errors"]
+    assert status["processed"] == 2 and not status["errors"]
 
 
 def test_watch_folder_deletes_originals_once_exported(client, env):
@@ -101,27 +99,10 @@ def test_watch_folder_deletes_originals_once_exported(client, env):
     assert keep.exists()
 
 
-def test_watch_folder_exports_instagram_and_full_jpeg(client, env):
-    _, out, raw = env
-    inbox = raw / "Both"
-    inbox.mkdir()
-    w = client.app_state.watcher
-    w.min_age = 0
-    r = client.put("/api/watch", json={"enabled": True, "root": "Footage", "folder": "Both",
-                                       "out_root": "NAS", "out_folder": "Mine", "interval": 3600,
-                                       "photos": "both", "delete_originals": True})
-    assert r.status_code == 200 and r.json()["settings"]["photos"] == "both"
-    horizon_scene(inbox / "DJI_0700.JPG", 0, 1600, 1200)
-    assert w.scan() == 0 and w.scan() == 1
-    entry = w.seen[str(inbox / "DJI_0700.JPG")]
-    assert entry["action"] == "instagram + full" and len(entry["jobs"]) == 2
-    client.app_state.jobs.wait_idle(300)
-    w.scan()
-    ig = next((out / "Mine").glob("*DJI_0700 IG.jpg"))
-    full = out / "Mine" / "DJI_0700_BRM.jpg"
-    assert Image.open(ig).width == 1080
-    assert Image.open(full).size == (1600, 1200)            # full resolution
-    assert not (inbox / "DJI_0700.JPG").exists()            # deleted only after both exports
+def test_watch_folder_old_instagram_settings_become_full(client):
+    w = client.put("/api/watch", json={"photos": "both"}).json()["settings"]
+    assert w["photos"] == "full"
+    assert client.put("/api/watch", json={"photos": "instagram"}).json()["settings"]["photos"] == "full"
 
 
 def test_watch_folder_uses_jpeg_and_skips_its_dng_twin(client, env):

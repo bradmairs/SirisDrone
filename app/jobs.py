@@ -205,12 +205,19 @@ def _unique_path(folder: Path, stem: str, ext: str, overwrite: bool) -> Path:
     return p
 
 
-def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
-                 stamp_mask, job: Job, frame: tuple | None = None, n: int = 1,
-                 carousel: bool = False) -> str:
-    """Render a photo (or a video frame when `frame=(meta, t)`) at full quality.
+def _with_location(edit: dict, gps) -> dict:
+    """Fill in an empty location stamp from GPS (items added before 1.1 have none yet)."""
+    loc = edit["location"]
+    if loc["enabled"] and not loc["text"]:
+        text = geo.city_country(gps)
+        if text:
+            return {**edit, "location": {**loc, "text": text}}
+    return edit
 
-    carousel=True splits a panorama into seamless 1080x1350 Instagram slides."""
+
+def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
+                 stamp_mask, job: Job, frame: tuple | None = None, n: int = 1) -> str:
+    """Render a photo (or a video frame when `frame=(meta, t)`) at full quality."""
     edit = normalize_edit(edit)
     job.progress = 0.05
     if frame:
@@ -227,19 +234,11 @@ def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
         gps = geo.gps_from_exif(info.get("exif"))
     if job.cancel.is_set():
         raise InterruptedError
+    edit = _with_location(edit, gps)
     place = geo.place_name(gps) if "{place}" in opts["name_pattern"] else ""
     job.progress = 0.35
     ext = render.PHOTO_FORMATS[opts["photo_format"]]
     base = output_stem(opts["name_pattern"], stem, date, n, place)
-
-    if carousel:
-        slides = render.render_carousel(src, edit, stamp_mask)
-        del src
-        paths = []
-        for i, slide in enumerate(slides, start=1):
-            paths.append(_save(slide, dest, f"{base}_{i:02d}", ext, opts, info))
-            job.progress = 0.4 + 0.6 * i / len(slides)
-        return f"{paths[0]} (+{len(paths) - 1} slides)"
 
     rgb = render.render(src, edit, long_edge=size_spec(opts["photo_size"]), stamp_mask=stamp_mask,
                         allow_upscale=True)
@@ -274,6 +273,7 @@ def export_video(src_path: Path, meta: dict, name: str, edit: dict, opts: dict, 
     def progress(p):
         job.progress = p
 
+    edit = _with_location(normalize_edit(edit), geo.gps_for_video(src_path, meta))
     edit = video.resolve_stamp(src_path, meta, edit, stamp_mask)
 
     def attempt(use_gpu: bool) -> None:

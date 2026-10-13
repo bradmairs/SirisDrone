@@ -9,8 +9,8 @@ on the machine running the app, ideally your server, using its **NVIDIA GPU**
 (e.g. RTX 3060) for video. It's tuned for the **DJI Mini 3 Pro**.
 
 **The fast path:** turn on **Automation**, then copy a flight's files into the NAS
-"Inbox" folder. Photos come out as finished Instagram posts (in their own orientation, 1080 wide;
-portraits 4:5, BRM Blue, stamp, level horizon), and panoramas as swipeable carousels. Videos come
+"Inbox" folder. Photos come out as full-quality JPEGs (BRM Blue, level horizon, the BRM Highlife
+stamp and a "City, Country" location stamp). Videos come
 out as full-quality 4K HEVC files with BRM Blue and the stamp, ready for your
 Apple TV 4K screensaver.
 
@@ -19,8 +19,9 @@ Apple TV 4K screensaver.
 | | |
 |---|---|
 | **Upload / import** | Drag & drop photos and videos, or *Import from NAS* to edit footage already on the NAS without uploading it again. Supports JPEG, DNG (RAW), PNG, TIFF, MP4, MOV and MKV, including 4K 10-bit H.265. |
-| **Automation (watch folder)** | Watches a NAS folder. Each new photo or video is added to the library, auto-edited (BRM Blue, stamp, level horizon, exposure; the D-Cinelike look for 10-bit Mini 3 Pro clips) and exported. Photos go out as Instagram posts and panoramas as carousels (or, with *Instagram post + full resolution JPEG*, both an Instagram copy and a full-quality JPEG); videos as Apple TV 4K. Files that are still copying are left until they finish, originals are never changed, and you can tweak and re-export anything later. |
-| **One-click exports** | **Instagram post** (keeps the photo's orientation: landscape stays landscape at 1080 wide, cropped only past 1.91:1; portrait is cropped to 4:5, 1080 × 1350; JPEG, GPS removed; panoramas become a **carousel** of seamless 1080 × 1350 slides with the stamp on the last one), **Apple TV 4K** (3840 × 2160 HEVC 10-bit, maximum quality, source frame rate up to 60 fps, `hvc1`-tagged for Apple devices) and **Full resolution**. |
+| **Automation (watch folder)** | Watches a NAS folder. Each new photo or video is added to the library, auto-edited (BRM Blue, stamp, level horizon, exposure; the D-Cinelike look for 10-bit Mini 3 Pro clips) and exported. Photos go out as full-resolution JPEGs; videos as Apple TV 4K. Files that are still copying are left until they finish, originals are never changed, and you can tweak and re-export anything later. |
+| **Location stamp** | "City, Country" (e.g. *Cowes, Australia*) bottom-left, looked up from the photo/video GPS (EXIF, video metadata or the DJI `.SRT`) via OpenStreetMap when the file is added. Smaller than the BRM Highlife stamp, black or white for contrast; edit the text, size and colour in *Location Stamp*. |
+| **One-click exports** | **Apple TV 4K** (3840 × 2160 HEVC 10-bit, maximum quality, source frame rate up to 60 fps, `hvc1`-tagged for Apple devices) and **Full resolution**. |
 | **NVIDIA GPU** | Video is decoded (NVDEC) and encoded (NVENC H.264 / HEVC 10-bit) on the GPU, including exports, playback previews and hyperlapses. The top bar shows which GPU is in use. If the GPU is missing or busy, the job is redone on the CPU automatically. The colour-grading and stamp filters always run on the CPU, because FFmpeg has no GPU version of them. |
 | **Auto fix** | **Auto-level horizon** finds the horizon and straightens it (and leaves straight-down shots alone). **Auto exposure** brightens or darkens mid-tones without clipping the sky. |
 | **Crop & rotate** | Drag-to-crop with a rule-of-thirds grid. Aspect presets: 16:9, 9:16 (Reels/TikTok), 4:5 (Instagram), 1:1, 4:3, 3:2, 2.39:1, 21:9, original, free. Rotate 90°, flip, and **straighten** (horizon levelling) with automatic zoom so no empty corners show. |

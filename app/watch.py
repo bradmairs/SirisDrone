@@ -2,7 +2,7 @@
 
 Each new file is added to the library (linked, never moved or changed), gets the automatic
 edit (BRM Blue, stamp, level horizon, exposure; D-Cinelike look for 10-bit video), and is
-exported with a recipe: photos → Instagram post (panoramas → carousel), videos → Apple TV 4K.
+exported with a recipe: photos → full-resolution JPEG, videos → Apple TV 4K.
 Files still being copied are left alone until their size stops changing.
 
 With `delete_originals` on, a file picked up while it is on is deleted from the watch folder
@@ -29,7 +29,7 @@ DEFAULT_WATCH = {
     "recursive": False,
     "out_root": None,        # an output root, e.g. "NAS"
     "out_folder": "",        # e.g. "Auto exports"
-    "photos": "instagram",   # instagram | full | both (instagram + full) | skip
+    "photos": "full",        # full | skip
     "videos": "appletv",     # appletv | full | skip
     "auto_level": True,
     "auto_exposure": True,
@@ -37,7 +37,7 @@ DEFAULT_WATCH = {
     "process_existing": False,
     "delete_originals": False,  # delete each picked-up file once its export is done
 }
-PHOTO_ACTIONS = ("instagram", "full", "both", "skip")
+PHOTO_ACTIONS = ("full", "skip")
 VIDEO_ACTIONS = ("appletv", "full", "skip")
 
 
@@ -46,7 +46,7 @@ def normalize_watch(w: dict | None) -> dict:
     for k in ("enabled", "recursive", "auto_level", "auto_exposure", "process_existing",
               "delete_originals"):
         o[k] = bool(o[k])
-    o["photos"] = o["photos"] if o["photos"] in PHOTO_ACTIONS else "instagram"
+    o["photos"] = "skip" if o["photos"] == "skip" else "full"  # Instagram options were removed in 1.1
     o["videos"] = o["videos"] if o["videos"] in VIDEO_ACTIONS else "appletv"
     o["folder"] = str(o["folder"] or "").strip().strip("/\\")
     o["out_folder"] = str(o["out_folder"] or "").strip().strip("/\\")
@@ -199,21 +199,14 @@ class Watcher:
         if action == "skip":
             self.lib.set_edit(item["id"], edit)
             return {"item": item["id"], "action": "edited only"}
-        # "both": an Instagram copy plus a full-quality JPEG; the library keeps the full edit.
-        wanted = ["instagram", "full"] if action == "both" else [action]
+        recipe = action
+        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
         base = self.get_settings()["export"]
-        exports = []
-        for name in reversed(wanted):  # last one's edit is what the library keeps
-            recipe = recipes.resolve(name, item, edit)
-            r_edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
-            opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
-                                          "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
-            dest = self.export_dest(opts)
-            job = self.submit_export(item, r_edit, opts, dest, carousel=recipe == "carousel")
-            exports.append((recipe, job["id"]))
-        exports.reverse()
-        out = {"item": item["id"], "action": " + ".join(r for r, _ in exports),
-               "job": exports[0][1], "jobs": [j for _, j in exports]}
+        opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
+                                      "folder": w["out_folder"], **recipes.RECIPES[recipe]["options"]})
+        dest = self.export_dest(opts)
+        job = self.submit_export(item, edit, opts, dest)
+        out = {"item": item["id"], "action": recipe, "job": job["id"], "jobs": [job["id"]]}
         if w["delete_originals"]:
             out["delete_after"] = True
         return out

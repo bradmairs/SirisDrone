@@ -381,6 +381,7 @@ function buildPanel() {
   controls.push({ sync() { $$("#gradSw .swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === state.edit.grad.color)); } });
 
   buildStampSection();
+  buildLocationSection();
   buildVideoSection();
 
   // remember which sections are open
@@ -448,6 +449,45 @@ function buildStampSection() {
       if (img.getAttribute("src") !== src) img.src = src;
       $("#stampReset").hidden = !state.cfg.custom_stamp;
       $("#stampDefaults").disabled = JSON.stringify(s) === JSON.stringify(state.cfg.default_edit.stamp);
+    },
+  });
+}
+
+function buildLocationSection() {
+  const ls = section("location", "Location Stamp", true);
+  const tog = el(`<label class="toggle"><span>Add location</span><input type="checkbox" id="locOn"></label>`);
+  $("input", tog).onchange = (e) => { state.edit.location.enabled = e.target.checked; editChanged(); };
+  ls.append(tog);
+  const txt = el(`<div class="field"><label>Text (bottom-left)</label><div class="row">
+      <input id="locText" placeholder="City, Country" maxlength="80">
+      <button class="btn sm" id="locDetect" title="Look up City, Country from the photo/video GPS">From GPS</button></div></div>`);
+  $("#locText", txt).onchange = (e) => { state.edit.location.text = e.target.value.trim(); editChanged(); };
+  $("#locDetect", txt).onclick = async () => {
+    if (!state.current) return;
+    try {
+      await saveEdit.flush();
+      const r = await api("POST", `/api/media/${state.current.id}/location`);
+      state.edit.location = r.edit.location; editChanged(); toast(`Location: ${r.text}`);
+    } catch (e) { toast(e.message, "error"); }
+  };
+  ls.append(txt);
+  ls.append(slider("location.size", "Size", 0.5, 8, 0.1));
+  ls.append(slider("location.margin", "Margin", 0, 20, 0.5));
+  const sw = el(`<div class="field"><label>Colour</label><div class="swatches">
+      <button class="swatch swatch-auto" data-c="auto" title="Auto: black or white, whichever stands out against the background">A</button>
+      <button class="swatch" data-c="#ffffff" style="background:#fff" title="White"></button>
+      <button class="swatch" data-c="#000000" style="background:#000" title="Black"></button></div></div>`);
+  sw.onclick = (e) => {
+    const c = e.target.closest(".swatch")?.dataset.c; if (!c) return;
+    state.edit.location.color = c; editChanged();
+  };
+  ls.append(sw);
+  controls.push({
+    sync() {
+      const l = state.edit.location;
+      $("#locOn").checked = l.enabled;
+      if (document.activeElement !== $("#locText")) $("#locText").value = l.text;
+      $$("[data-sec=location] .swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === l.color));
     },
   });
 }
@@ -1222,9 +1262,8 @@ function exportIds() {
 function renderQuick() {
   const row = $("#quickRow");
   row.innerHTML = "";
-  const icons = { instagram: "📱", carousel: "🖼", appletv: "📺", full: "⬛" };
+  const icons = { appletv: "📺", full: "⬛" };
   for (const [key, r] of Object.entries(state.cfg.recipes)) {
-    if (key === "carousel") continue; // "Instagram post" turns panoramas into carousels itself
     const b = el(`<button type="button" class="btn"><span>${icons[key] || ""} ${escapeHtml(r.label)}</span><small>${escapeHtml(r.help)}</small></button>`);
     b.onclick = () => quickExport(key);
     row.append(b);
@@ -1367,7 +1406,7 @@ function renderJobs() {
   for (const j of [...state.jobs].reverse()) {
     const pct = Math.round(j.progress * 100);
     const st = { queued: "Waiting", running: `${pct}%`, done: "Done", error: "Failed", cancelled: "Cancelled" }[j.status];
-    const li = el(`<li><div class="top"><span class="name">${({ frame: "🖼 frame · ", carousel: "🖼 carousel · ", hdr: "◐ ", hyperlapse: "⏩ " })[j.kind] || ""}${escapeHtml(j.name)}</span>
+    const li = el(`<li><div class="top"><span class="name">${({ frame: "🖼 frame · ", hdr: "◐ ", hyperlapse: "⏩ " })[j.kind] || ""}${escapeHtml(j.name)}</span>
         <span class="st ${j.status}">${st}${(j.status === "queued" || j.status === "running") ? ` <button class="link" data-cancel="${j.id}">cancel</button>` : ""}</span></div>
         ${j.status === "running" ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
         ${j.output ? `<div class="out">${escapeHtml(j.output)}</div>` : ""}
