@@ -26,20 +26,47 @@ def load_mask(path: Path) -> Image.Image:
     return _load_mask(str(path), path.stat().st_mtime)
 
 
+_LOC_FONT_SIZE = 160   # mask resolution; the stamp is scaled to its on-image size later
+_LOC_CAP_SCALE = 0.85  # all-caps reads bigger than mixed case: shrink to look the same size
+_LOC_TRACKING = 0.12   # letter spacing, as a fraction of the font size
+_LOC_BOLD = 3          # stroke width that makes the town bold
+_LOC_COUNTRY = 0.7     # country is drawn at 70% so the town leads
+
+
+def _tracked(draw: ImageDraw.ImageDraw, x: float, y: float, text: str, font, fill: int,
+             stroke: int = 0) -> float:
+    """Draw letter-spaced text; returns the x after the last letter."""
+    for ch in text:
+        draw.text((x, y), ch, fill=fill, font=font, stroke_width=stroke, stroke_fill=fill, anchor="ls")
+        x += font.getlength(ch) + _LOC_TRACKING * font.size
+    return x
+
+
 @lru_cache(maxsize=32)
 def location_mask(text: str) -> Image.Image | None:
-    """Alpha mask of the location text (e.g. "Cowes, Australia"), one line, in a clean sans
-    (Pillow's built-in Aileron, so no font files are needed). Full line height, so every
-    location has the same letter size whatever its letters."""
+    """Alpha mask of the location: a thin accent bar, the town in bold spaced capitals and the
+    country lighter, e.g. "| CAPE WOOLAMAI  AUSTRALIA". Pillow's built-in Aileron, so no font
+    files are needed. The mask is one full line high whatever the letters, so every location
+    is the same size on the image."""
     text = " ".join(text.split())
     if not text:
         return None
-    font = ImageFont.load_default(size=160)
-    ascent, descent = font.getmetrics()
-    left, _, right, _ = font.getbbox(text)
-    pad = 8
-    img = Image.new("L", (right - left + 2 * pad, ascent + descent), 0)
-    ImageDraw.Draw(img).text((pad - left, 0), text, fill=255, font=font)
+    town, _, country = (p.strip().upper() for p in text.partition(","))
+    box = ImageFont.load_default(size=_LOC_FONT_SIZE)
+    ascent, descent = box.getmetrics()
+    font = ImageFont.load_default(size=round(_LOC_FONT_SIZE * _LOC_CAP_SCALE))
+    cap = font.getbbox("H", anchor="ls")[1]            # negative: cap top above the baseline
+    spacing = _LOC_TRACKING * font.size
+    bar_w, gap, sep = round(font.size * 0.09), round(font.size * 0.4), round(font.size * 0.45)
+    width_of = lambda t: sum(font.getlength(c) for c in t) + spacing * max(len(t) - 1, 0)
+    width = 8 + bar_w + gap + width_of(town) + (sep + width_of(country) if country else 0) + 8 + _LOC_BOLD
+    img = Image.new("L", (int(width), ascent + descent), 0)
+    draw = ImageDraw.Draw(img)
+    base = ascent                                       # baseline where it was before
+    draw.rectangle((8, base + cap - 4, 8 + bar_w, base + 4), fill=255)
+    x = _tracked(draw, 8 + bar_w + gap, base, town, font, 255, _LOC_BOLD)
+    if country:
+        _tracked(draw, x - spacing + sep, base, country, font, round(255 * _LOC_COUNTRY))
     return img
 
 
