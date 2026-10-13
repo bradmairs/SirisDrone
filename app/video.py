@@ -20,7 +20,7 @@ from PIL import Image
 from . import gpu, grading, render
 from .edits import normalize_edit, plan_geometry
 from .render import SHARPEN_MAX, SHARPEN_SIZE, grad_overlay, vignette_overlay
-from .stamp import AUTO, render_stamp, resolve_color
+from .stamp import AUTO, location_mask, location_settings, render_stamp, resolve_color
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts", ".m2ts"}
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
@@ -164,20 +164,28 @@ def prepare_stabilize(src: Path, meta: dict, edit: dict, workdir: Path, use_gpu:
 
 
 def resolve_stamp(path: Path, meta: dict, edit: dict, stamp_mask: Image.Image | None) -> dict:
-    """Pick black/white for an "auto" stamp colour from a graded frame halfway through the
-    trimmed clip, so one colour is used for the whole video."""
+    """Pick black/white for "auto" stamp and location colours from a graded frame halfway
+    through the trimmed clip, so one colour is used for the whole video."""
     edit = normalize_edit(edit)
-    s = edit["stamp"]
-    if not s["enabled"] or s["color"] != AUTO or stamp_mask is None:
+    s, loc = edit["stamp"], edit["location"]
+    loc_mask = location_mask(loc["text"]) if loc["enabled"] and loc["color"] == AUTO else None
+    stamp_auto = s["enabled"] and s["color"] == AUTO and stamp_mask is not None
+    if stamp_mask is None or not (stamp_auto or loc_mask):
         return edit
     start, dur = _trim(meta, edit["video"])
     try:
         frame = extract_frame(path, meta, start + dur / 2, long_edge=1280)
     except Exception:
-        return {**edit, "stamp": {**s, "color": "#000000"}}
+        return {**edit, "stamp": {**s, "color": "#000000"} if stamp_auto else s,
+                "location": {**loc, "color": "#ffffff"} if loc_mask else loc}
     rgb = render.render(render.from_array(frame), {**edit, "stamp": {**s, "enabled": False}},
                         long_edge=1280)
-    return {**edit, "stamp": resolve_color(rgb, stamp_mask, s)}
+    out = dict(edit)
+    if stamp_auto:
+        out["stamp"] = resolve_color(rgb, stamp_mask, s)
+    if loc_mask:
+        out["location"] = {**loc, "color": resolve_color(rgb, loc_mask, location_settings(loc, loc_mask))["color"]}
+    return out
 
 
 def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image | None,
@@ -269,6 +277,11 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
     if edit["stamp"]["enabled"] and stamp_mask is not None:
         img, x, y = render_stamp(stamp_mask, out_w, out_h, edit["stamp"])
         overlay(img, "stamp", x, y)
+    loc = edit["location"]
+    loc_mask = location_mask(loc["text"]) if loc["enabled"] and stamp_mask is not None else None
+    if loc_mask is not None:
+        img, x, y = render_stamp(loc_mask, out_w, out_h, location_settings(loc, loc_mask))
+        overlay(img, "location", x, y)
     graph.append(f"[{last}]format={out_pix_fmt}[vout]")
 
     start, src_dur = _trim(meta, v)

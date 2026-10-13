@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 @lru_cache(maxsize=4)
@@ -24,6 +24,29 @@ def _load_mask(path: str, mtime: float) -> Image.Image:
 
 def load_mask(path: Path) -> Image.Image:
     return _load_mask(str(path), path.stat().st_mtime)
+
+
+@lru_cache(maxsize=32)
+def location_mask(text: str) -> Image.Image | None:
+    """Alpha mask of the location text (e.g. "Cowes, Australia"), one line, in a clean sans
+    (Pillow's built-in Aileron, so no font files are needed). Full line height, so every
+    location has the same letter size whatever its letters."""
+    text = " ".join(text.split())
+    if not text:
+        return None
+    font = ImageFont.load_default(size=160)
+    ascent, descent = font.getmetrics()
+    left, _, right, _ = font.getbbox(text)
+    pad = 8
+    img = Image.new("L", (right - left + 2 * pad, ascent + descent), 0)
+    ImageDraw.Draw(img).text((pad - left, 0), text, fill=255, font=font)
+    return img
+
+
+def location_settings(loc: dict, mask: Image.Image) -> dict:
+    """The location's settings in render_stamp() terms (which sizes by width)."""
+    return {"enabled": True, "position": loc["position"], "size": loc["size"] * mask.width / mask.height,
+            "margin": loc["margin"], "opacity": loc["opacity"], "color": loc["color"], "shadow": 0}
 
 
 AUTO = "auto"  # stamp colour chosen per image: black or white, whichever contrasts more

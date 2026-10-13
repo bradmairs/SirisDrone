@@ -14,7 +14,7 @@ from PIL import Image, ImageOps
 
 from . import grading
 from .edits import Geometry, normalize_edit, plan_geometry
-from .stamp import composite, render_stamp, resolve_color
+from .stamp import composite, location_mask, location_settings, render_stamp, resolve_color
 
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".dng"}
 RAW_EXTS = {".dng"}
@@ -394,40 +394,17 @@ def render(src, edit: dict, *, long_edge: int | None = None, mode: str = "final"
         apply_grad(rgb, edit["grad"])
         apply_vignette(rgb, edit["vignette"])
         apply_sharpen(rgb, edit["sharpen"])
+        loc = edit["location"]
+        loc_mask = location_mask(loc["text"]) if loc["enabled"] and stamp_mask is not None else None
+        # Both colours are chosen from the image before either is drawn.
+        loc_s = resolve_color(rgb, loc_mask, location_settings(loc, loc_mask)) if loc_mask else None
         if edit["stamp"]["enabled"] and stamp_mask is not None:
             stamp, x, y = render_stamp(stamp_mask, out_w, out_h, resolve_color(rgb, stamp_mask, edit["stamp"]))
             composite(rgb, stamp, x, y)
+        if loc_s:
+            stamp, x, y = render_stamp(loc_mask, out_w, out_h, loc_s)
+            composite(rgb, stamp, x, y)
     return rgb
-
-
-SLIDE_W, SLIDE_H = 1080, 1350  # Instagram portrait (4:5)
-MAX_SLIDES = 20
-
-
-def carousel_layout(cw: float, ch: float) -> tuple[int, tuple[int, int]]:
-    """Number of slides and the render size that covers n*1080 x 1350 for a cw x ch crop."""
-    n = int(np.clip(round(cw / ch * SLIDE_H / SLIDE_W), 2, MAX_SLIDES))
-    k = max(n * SLIDE_W / cw, SLIDE_H / ch)
-    return n, (max(n * SLIDE_W, round(cw * k)), max(SLIDE_H, round(ch * k)))
-
-
-def render_carousel(src, edit: dict, stamp_mask=None) -> list[np.ndarray]:
-    """Split a (panorama) crop into seamless 4:5 slides; the stamp goes on the last one."""
-    edit = normalize_edit(edit)
-    w, h = src_size(src)
-    geo = plan_geometry(w, h, edit)
-    n, box = carousel_layout(geo.cw, geo.ch)
-    rgb = render(src, {**edit, "stamp": {**edit["stamp"], "enabled": False}}, long_edge=box,
-                 allow_upscale=True)
-    H, W = rgb.shape[:2]
-    x0, y0 = (W - n * SLIDE_W) // 2, (H - SLIDE_H) // 2
-    strip = rgb[y0:y0 + SLIDE_H, x0:x0 + n * SLIDE_W]
-    slides = [np.ascontiguousarray(strip[:, i * SLIDE_W:(i + 1) * SLIDE_W]) for i in range(n)]
-    if edit["stamp"]["enabled"] and stamp_mask is not None:
-        s = resolve_color(slides[-1], stamp_mask, edit["stamp"])
-        st, x, y = render_stamp(stamp_mask, SLIDE_W, SLIDE_H, s)
-        composite(slides[-1], st, x, y)
-    return slides
 
 
 def to_uint8(rgb: np.ndarray) -> np.ndarray:

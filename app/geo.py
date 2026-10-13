@@ -24,6 +24,7 @@ _ADDRESS_ORDER = ("natural", "beach", "bay", "peak", "island", "tourism", "leisu
                   "hamlet", "village", "suburb", "town", "city", "municipality", "county", "state")
 
 _lock = threading.Lock()
+_lock_http = threading.Lock()
 _last_call = 0.0
 _cache: dict | None = None
 _cache_file: Path | None = None
@@ -141,6 +142,66 @@ def _lookup(lat: float, lon: float) -> str:
         if addr.get(key):
             return str(addr[key])
     return str(data.get("name") or "")
+
+
+# Nearest named place first: drone shots are mostly outside big cities, and "Christmas Hills"
+# says more than "Melbourne". County/state only when no place is found nearby.
+_CITY_KEYS = ("town", "village", "suburb", "hamlet", "city", "municipality")  # not "locality": often a park
+_FALLBACK_KEYS = ("county", "state")
+# Over the sea or a beach Nominatim often has only the state; nudging the point towards land
+# finds the nearest town (2 km, then 5 km away).
+_NUDGES = ((0, 0), (0.02, 0), (-0.02, 0), (0, 0.02), (0, -0.02),
+           (0.05, 0), (-0.05, 0), (0, 0.05), (0, -0.05))
+
+
+def _lookup_address(lat: float, lon: float) -> dict:
+    """Nominatim address in English, detailed enough (zoom 16) to name villages."""
+    global _last_call
+    url = os.environ.get("SIRIS_GEOCODER") or DEFAULT_URL
+    q = urllib.parse.urlencode({"format": "jsonv2", "lat": f"{lat:.5f}", "lon": f"{lon:.5f}",
+                                "zoom": 16, "addressdetails": 1, "accept-language": "en"})
+    with _lock_http:
+        wait = 1.05 - (time.time() - _last_call)  # Nominatim: at most one request a second
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.time()
+        req = urllib.request.Request(f"{url}?{q}", headers={
+            "User-Agent": "SirisDrone-Studio/1.0 (self-hosted drone photo editor)"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode()).get("address") or {}
+
+
+def city_country(gps: tuple[float, float] | None) -> str:
+    """"City, Country" for a GPS position (e.g. "Cowes, Australia"), or "" when there is no
+    GPS, no connection or lookups are off. Cached like place_name."""
+    if not gps or os.environ.get("SIRIS_GEOCODER", "").lower() in ("off", "0", "false"):
+        return ""
+    key = f"cc:{gps[0]:.2f},{gps[1]:.2f}"  # ~1 km: plenty for a city name
+    with _lock:
+        cache = _load_cache()
+        if key in cache:
+            return cache[key]
+    city, country, fallback = "", "", ""
+    try:
+        for dlat, dlon in _NUDGES:
+            addr = _lookup_address(gps[0] + dlat, gps[1] + dlon)
+            country = country or str(addr.get("country") or "")
+            fallback = fallback or next((str(addr[k]) for k in _FALLBACK_KEYS if addr.get(k)), "")
+            city = next((str(addr[k]) for k in _CITY_KEYS if addr.get(k)), "")
+            if city:
+                break
+    except Exception:
+        return ""  # offline: try again next time
+    text = ", ".join(p for p in (city or fallback, country) if p)[:80]
+    with _lock:
+        cache = _load_cache()
+        cache[key] = text
+        if _cache_file:
+            try:
+                _cache_file.write_text(json.dumps(cache, indent=0))
+            except OSError:
+                pass
+    return text
 
 
 def place_name(gps: tuple[float, float] | None) -> str:

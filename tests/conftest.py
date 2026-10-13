@@ -34,6 +34,13 @@ def make_video(path: Path, size="640x360", seconds=2, audio=True) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def no_city_lookups(monkeypatch):
+    """Tests never call OpenStreetMap; location tests patch in their own address."""
+    from app import geo
+    monkeypatch.setattr(geo, "_lookup_address", lambda lat, lon: {})
+
+
 @pytest.fixture
 def env(tmp_path):
     out = tmp_path / "nas" / "exports"

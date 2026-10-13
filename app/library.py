@@ -12,7 +12,7 @@ from typing import BinaryIO
 
 from PIL import Image
 
-from . import render, video
+from . import geo, render, video
 from .edits import normalize_edit
 
 PROXY_EDGE = 2048
@@ -109,12 +109,29 @@ class Library:
             shutil.rmtree(self._item_dir(mid), ignore_errors=True)
             raise ValueError(f"{name}: unsupported or damaged file ({exc})") from exc
         self._write_meta(item)
-        self.set_edit(mid, default_edit or {})
+        edit = self.set_edit(mid, default_edit or {})
+        if not edit["location"]["text"]:
+            text = self.detect_location(item)
+            if text:
+                self.set_edit(mid, {**edit, "location": {**edit["location"], "text": text}})
         try:
             self.make_thumb(item)
         except Exception:
             pass  # preview will surface the problem; keep the item
         return item
+
+    def detect_location(self, item: dict) -> str:
+        """"City, Country" from the photo's EXIF GPS or the video's GPS (metadata or DJI .SRT)."""
+        try:
+            src = self.source_path(item)
+            if item["kind"] == "photo":
+                with Image.open(src) as im:  # JPEG and DNG (TIFF container) both work
+                    gps = geo.gps_from_exif(im.getexif().tobytes())
+            else:
+                gps = geo.gps_for_video(src, item)
+            return geo.city_country(gps)
+        except Exception:
+            return ""
 
     def add_upload(self, filename: str, stream: BinaryIO, default_edit: dict | None = None) -> dict:
         name = Path(filename).name

@@ -3,6 +3,18 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.1 – 2026-10-13
+
+- **Location stamp:** "City, Country" (e.g. "Cowes, Australia") in the bottom-left of photos and
+  videos, looked up from the file's GPS (EXIF, video metadata or DJI .SRT) when it is added.
+  Smaller than the BRM Highlife stamp, with automatic black/white contrast. Editable in the new
+  *Location Stamp* section (text, *From GPS*, size, margin, colour); filled in at export for
+  items added before 1.1.
+- **Instagram exports removed:** the Instagram post / carousel one-click exports and the
+  automation's Instagram options are gone; automation exports photos as full-quality JPEGs.
+  Saved automation settings that used Instagram switch to full resolution.
+- **Fix:** the library's selection actions wrap instead of spilling into the viewer.
+
 ## 1.0 – 2026-10-11
 
 First release of SirisDrone Studio, the BRM Highlife drone photo & video editor.

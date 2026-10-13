@@ -353,7 +353,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return dest
 
     def submit_export(item: dict, edit: dict, opts: dict, dest: Path, n: int = 1,
-                      frame_time: float | None = None, carousel: bool = False) -> dict:
+                      frame_time: float | None = None) -> dict:
         mask = stamp_mask()
         src = lib.source_path(item)
         if frame_time is not None and item["kind"] == "video":
@@ -364,9 +364,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             kind = "video"
             run = lambda job: jobs.export_video(src, item, item["name"], edit, opts, dest, mask, job, n=n)
         else:
-            kind = "carousel" if carousel else "photo"
+            kind = "photo"
             run = lambda job: jobs.export_photo(src, item["name"], edit, opts, dest, mask, job,
-                                                n=n, carousel=carousel)
+                                                n=n)
         return queue.submit(item["id"], item["name"], kind, run).public()
 
     app.state.submit_export, app.state.export_dest = submit_export, export_dest
@@ -383,7 +383,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.post("/api/quick-export")
     def quick_export(body: dict = Body(...)):
-        """One-click recipe export (Instagram post / carousel, Apple TV 4K, full resolution)."""
+        """One-click recipe export (Apple TV 4K, full resolution)."""
         name = body.get("recipe")
         if name not in recipes.RECIPES:
             raise HTTPException(400, "Unknown export recipe")
@@ -393,7 +393,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         for n, mid in enumerate(body.get("media_ids", []), start=1):
             item = item_or_404(mid)
             edit = lib.get_edit(mid)
-            recipe = recipes.resolve(name, item, edit)
+            recipe = name
             if item["kind"] not in recipes.RECIPES[recipe]["kinds"]:
                 skipped.append(item["name"])
                 continue
@@ -402,7 +402,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                                           **recipes.RECIPES[recipe]["options"]})
             dest = dest or export_dest(opts)
             edit = lib.set_edit(mid, recipes.recipe_edit(recipe, item, edit))  # show what was exported
-            created.append(submit_export(item, edit, opts, dest, n, carousel=recipe == "carousel"))
+            created.append(submit_export(item, edit, opts, dest, n))
         return {"jobs": created, "skipped": skipped, "destination": str(dest) if dest else None}
 
     def photo_items(ids: list, minimum: int, what: str) -> list[dict]:
@@ -448,6 +448,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                                                               bool(body.get("stabilize", True)),
                                                               bool(body.get("deflicker", True))))
         return {"jobs": [job.public()], "destination": str(dest)}
+
+    @app.post("/api/media/{mid}/location")
+    def detect_location(mid: str):
+        """Look up "City, Country" from the item's GPS and save it in its edit."""
+        item = item_or_404(mid)
+        text = lib.detect_location(item)
+        if not text:
+            raise HTTPException(404, "No GPS location found in this file (or the lookup is offline)")
+        edit = lib.get_edit(mid)
+        edit = lib.set_edit(mid, {**edit, "location": {**edit["location"], "text": text}})
+        return {"text": text, "edit": edit}
 
     @app.post("/api/media/{mid}/auto")
     def auto_adjust(mid: str, body: dict = Body(...)):

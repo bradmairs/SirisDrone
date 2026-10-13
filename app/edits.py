@@ -38,6 +38,17 @@ DEFAULT_EDIT: dict = {
         "color": "#000000",
         "shadow": 0,      # drop-shadow strength 0..100
     },
+    # Where the shot was taken, bottom-left, e.g. "Cowes, Australia" (filled in from the
+    # photo/video GPS when it is added). Smaller than the BRM Highlife stamp; auto contrast.
+    "location": {
+        "enabled": True,
+        "text": "",
+        "position": "bl",
+        "size": 2.2,      # text height as % of the image's short edge (BRM stamp is ~4%)
+        "margin": 2.7,    # % of the short edge, same as the BRM stamp
+        "opacity": 95,
+        "color": "auto",
+    },
     "video": {
         "trim_start": 0.0,
         "trim_end": None,  # None = end of clip
@@ -95,6 +106,18 @@ def normalize_edit(edit: dict | None) -> dict:
         "opacity": _num(s.get("opacity"), 0, 100, 95),
         "color": color,
         "shadow": _num(s.get("shadow"), 0, 100, 0),
+    }
+
+    lo = {**DEFAULT_EDIT["location"], **(edit.get("location") or {})}
+    lcol = str(lo.get("color") or "auto")
+    e["location"] = {
+        "enabled": bool(lo.get("enabled")),
+        "text": " ".join(str(lo.get("text") or "").split())[:80],
+        "position": lo.get("position") if lo.get("position") in STAMP_POSITIONS else "bl",
+        "size": _num(lo.get("size"), 0.5, 15, 2.2),
+        "margin": _num(lo.get("margin"), 0, 20, 2.7),
+        "opacity": _num(lo.get("opacity"), 0, 100, 95),
+        "color": lcol if lcol == "auto" or (len(lcol) == 7 and lcol.startswith("#")) else "auto",
     }
 
     v = {**DEFAULT_EDIT["video"], **(edit.get("video") or {})}
