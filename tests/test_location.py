@@ -109,3 +109,12 @@ def test_video_without_gps_borrows_nearest_photo(tmp_path):
     lone = tmp_path / "DJI_0900.MP4"
     lone.write_bytes(b"x")
     assert geo.gps_for_video(lone, {}) is None
+
+
+def test_old_cached_locations_are_looked_up_again(monkeypatch, tmp_path):
+    import json
+    cache = tmp_path / "geo.json"
+    cache.write_text(json.dumps({"cc:-38.52,145.11": "Victoria, Australia"}))
+    geo.configure(cache)
+    monkeypatch.setattr(geo, "_lookup_address", lambda lat, lon: {"city_district": "Summerlands", "country": "Australia"})
+    assert geo.city_country((-38.517, 145.115)) == "Summerlands, Australia"

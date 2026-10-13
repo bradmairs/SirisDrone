@@ -214,7 +214,8 @@ def city_country(gps: tuple[float, float] | None) -> str:
     GPS, no connection or lookups are off. Cached like place_name."""
     if not gps or os.environ.get("SIRIS_GEOCODER", "").lower() in ("off", "0", "false"):
         return ""
-    key = f"cc:{gps[0]:.2f},{gps[1]:.2f}"  # ~1 km: plenty for a city name
+    # "cc2": results cached before 1.14 (no districts/islands) are looked up again.
+    key = f"cc2:{gps[0]:.2f},{gps[1]:.2f}"  # ~1 km: plenty for a city name
     with _lock:
         cache = _load_cache()
         if key in cache:
