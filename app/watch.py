@@ -18,6 +18,11 @@ on the first scan with nothing still copying and no new files from that trip. It
 trip's export folder and is remade, replacing the old one, when more clips arrive later. With
 `delete_originals` also on, the trip's clips are kept until the reel is done.
 
+When a trip is finished (nothing still copying or exporting, its reel made) a notification
+sums it up: what was exported, what was skipped as blurry/duplicate, the reel and any errors,
+with a few thumbnails (see notify.py). A scan that fails, e.g. because the NAS isn't mounted,
+is notified too, at most once an hour per problem.
+
 With `delete_originals` on, a file picked up while it is on is deleted from the watch folder
 (and dropped from the library) once its export has finished and the exported file exists. For
 when the watch folder holds copies of originals kept elsewhere. Failed or cancelled exports,
@@ -33,9 +38,9 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import culling, jobs, recipes, tripmatch
+from . import culling, jobs, notify, recipes, tripmatch
 from .config import resolve_in_root
-from .library import media_kind
+from .library import media_kind, trip_folder
 
 DEFAULT_WATCH = {
     "enabled": False,
@@ -93,7 +98,10 @@ class Watcher:
         self.seen: dict = self._load()
         self.pending: dict[str, tuple] = {}     # path -> (size, mtime) at last scan
         self.min_age = 10.0                     # seconds a file must be untouched
-        self.status = {"last_scan": None, "processed": 0, "errors": [], "recent": [], "waiting": 0}
+        self.status = {"last_scan": None, "processed": 0, "errors": [], "recent": [], "waiting": 0,
+                       "notifications": []}
+        self.trips: dict[str, dict] = {}        # trip folder -> what happened to it, until notified
+        self._alerted: dict[str, float] = {}    # problem -> when it was last notified
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -132,6 +140,7 @@ class Watcher:
                     self.scan()
                 except Exception as exc:  # keep watching after unexpected errors
                     self._error(f"Scan failed: {exc}")
+                    self._alert(f"Watch folder problem: {exc}")
                     traceback.print_exc()
             self._wake.wait(w["interval"])
             self._wake.clear()
@@ -199,11 +208,13 @@ class Watcher:
                 self.seen[key] = entry
                 if entry.get("action") != "batch":
                     self.status["recent"] = ([{"name": p.name, **entry}] + self.status["recent"])[:20]
+                    self._track(p, entry)
                 self._save()
             done += self._finish_batch(deferred, w)
             self.status["waiting"] = waiting
             if not waiting:
                 self._queue_reels(w, touched)
+                self._check_trips(touched)
         return done
 
     def _finish_batch(self, deferred: list[tuple[str, Path]], w: dict) -> int:
@@ -249,8 +260,79 @@ class Watcher:
                 entry["error"] = str(exc)
                 self._error(f"{path.name}: {exc}")
             self.status["recent"] = ([{"name": path.name, **entry}] + self.status["recent"])[:20]
+            self._track(path, entry)
         self._save()
         return done
+
+    # -- trip summaries and notifications --------------------------------------------
+    def _trip_rec(self, trip: str) -> dict:
+        return self.trips.setdefault(trip, {"photos": 0, "videos": 0, "rejected": 0, "errors": [],
+                                            "jobs": {}, "images": [], "reel": None, "folder": ""})
+
+    def _track(self, path: Path, entry: dict) -> None:
+        """Note what happened to one file, for its trip's notification."""
+        action = str(entry.get("action") or "")
+        jids = [j for j in (entry.get("jobs") or [entry.get("job")]) if j]
+        if entry.get("pair") or not (entry.get("error") or action.startswith("rejected") or jids):
+            return  # DNG twins and "edit only" files aren't reported
+        rec = self._trip_rec(trip_folder(path))
+        if entry.get("error"):
+            rec["errors"].append(f"{path.name}: {entry['error']}")
+        elif action.startswith("rejected"):
+            rec["rejected"] += 1
+        for jid in jids:
+            rec["jobs"][jid] = (path.name, media_kind(path.name))
+        if jids and entry.get("item") and len(rec["images"]) < 6:
+            try:
+                rec["images"].append((f"{path.stem}.jpg", self.lib.thumb_path(entry["item"]).read_bytes()))
+            except OSError:
+                pass
+
+    def _check_trips(self, touched: set[str]) -> None:
+        """Notify each trip that is finished: nothing new this scan, no reel pending, every
+        export done."""
+        for trip in list(self.trips):
+            if any(Path(t).is_relative_to(trip) for t in touched):
+                continue
+            if any(e.get("wait_reel") == trip for e in self.seen.values()):
+                continue
+            rec = self.trips[trip]
+            found = {jid: self.get_job(jid) for jid in rec["jobs"]}
+            if any(j and j["status"] in ("queued", "running") for j in found.values()):
+                continue
+            for jid, (name, kind) in rec["jobs"].items():
+                j = found[jid]
+                if not j or j["status"] != "done":
+                    status = j["status"] if j else "lost (the app restarted)"
+                    rec["errors"].append(f"{name}: export {status}" + (f": {j['error']}" if j and j.get("error") else ""))
+                elif kind == "reel":
+                    rec["reel"] = Path(j["output"]).name
+                else:
+                    rec["photos" if kind == "photo" else "videos"] += 1
+                    rec["folder"] = rec["folder"] or str(Path(j["output"]).parent)
+            del self.trips[trip]
+            title, message, failed = notify.trip_message(Path(trip).name, rec)
+            self._send(title, message, rec["images"], failed,
+                       {k: rec[k] for k in ("photos", "videos", "rejected", "errors", "reel", "folder")})
+
+    def _alert(self, message: str) -> None:
+        """Notify a problem, at most once an hour for the same message."""
+        now = time.time()
+        if now - self._alerted.get(message, 0) < 3600:
+            return
+        self._alerted[message] = now
+        self._send("SirisDrone needs attention", message, [], True, {"problem": message})
+
+    def _send(self, title: str, message: str, images: list, failed: bool, summary: dict) -> None:
+        n = notify.normalize_notify(self.get_settings().get("notify"))
+        if not n["enabled"] or not notify.channels(n):
+            return
+        results = notify.send(n, title, message, images, summary, failed)
+        for ch, res in results.items():
+            if res != "sent":
+                self._error(f"Notification by {ch} failed: {res}")
+        self.status["notifications"] = ([{"at": time.time(), "title": title, "results": results}]
+                                         + self.status["notifications"])[:10]
 
     @staticmethod
     def jpeg_twin(path: Path) -> Path | None:
@@ -320,6 +402,7 @@ class Watcher:
                                               "folder": entries[0].get("reel_folder", w["out_folder"]),
                                               **recipes.RECIPES[recipe]["options"]})
                 job = self.submit_reel(clips, opts, self.export_dest(opts), w["reel_length"], overwrite=True)
+                self._trip_rec(trip)["jobs"][job["id"]] = (f"{Path(trip).name} highlights", "reel")
                 for e in entries:
                     e["jobs"] = [j for j in (e.get("jobs") or [e.get("job")]) if j] + [job["id"]]
                 self.status["recent"] = ([{"name": f"{Path(trip).name} highlights", "action": "highlight reel",

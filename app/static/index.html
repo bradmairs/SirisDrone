@@ -21,6 +21,8 @@
     </label>
     <button class="btn" id="importBtn" title="Add files already on the NAS (no upload needed)">Import from NAS</button>
     <button class="btn" id="autoBtn" title="Watch a NAS folder and edit/export new drone files automatically">Automation <span class="dot" id="autoDot" hidden></span></button>
+    <button class="btn" id="mapBtn" title="Where your shots were taken, trip by trip">Map</button>
+    <button class="btn" id="statusBtn" title="NAS space, watch folder, GPU and recent problems">Status <span class="dot" id="statusDot" hidden></span></button>
     <span class="gpu-badge" id="gpuBadge" hidden></span>
     <button class="btn ghost" id="jobsBtn">Exports <span class="pill" id="jobsCount" hidden>0</span></button>
     <button class="btn primary" id="exportBtn" disabled>Export…</button>
@@ -235,16 +237,44 @@
     </div>
     <div class="field row wrap">
       <label class="chk" title="Once a trip's clips have all arrived, the best seconds of each are cut into one video in the trip's export folder"><input type="checkbox" id="wReel"> Make a highlight reel for each trip</label>
-      <select id="wReelLen" title="Reel length" style="width:auto"><option value="30">30 s</option><option value="60">1 min</option><option value="90">1½ min</option><option value="120">2 min</option></select>
+      <select id="wReelLen" title="Reel length" style="width:auto;flex:none"><option value="30">30 s</option><option value="60">1 min</option><option value="90">1½ min</option><option value="120">2 min</option></select>
     </div>
     <label class="chk" title="For when the watch folder holds copies of originals kept elsewhere"><input type="checkbox" id="wDelete"> Delete each file from the watch folder once it's exported</label>
     <p class="hint">Only files picked up while this is ticked, and only after their export has finished. Failed exports and “Edit only” files are kept. The watch folder must be writable.</p>
     <p class="hint">10-bit Mini 3 Pro videos are treated as D-Cinelike and get the “D-Cinelike → BRM Blue” look.</p>
+    <fieldset class="notify-box">
+      <legend><label class="chk"><input type="checkbox" id="nEnabled"> Notify me when a trip is done</label></legend>
+      <p class="hint">A summary of what was exported or skipped, the highlight reel, any errors, and a few thumbnails. Also sent if the watch folder runs into a problem, such as the NAS not being mounted.</p>
+      <div class="field"><label>ntfy topic URL <span class="hint">(phone push, free: ntfy.sh app)</span></label><input id="nNtfy" placeholder="https://ntfy.sh/your-secret-topic"></div>
+      <div class="field"><label>Webhook URL <span class="hint">(Discord, Slack or anything that takes JSON)</span></label><input id="nWebhook" placeholder="https://discord.com/api/webhooks/…"></div>
+      <div class="field"><label>Email to <span class="hint" id="nSmtpHint"></span></label><input id="nEmail" type="email" placeholder="you@example.com"></div>
+      <div class="row"><button type="button" class="btn ghost" id="nTest">Send a test</button><span class="hint" id="nTestResult"></span></div>
+    </fieldset>
     <div class="field"><label>Activity</label><ul class="jobs auto-log" id="wLog"></ul></div>
     <div class="dlg-actions">
       <button type="button" class="btn ghost" id="wScan">Check now</button>
       <button value="cancel" class="btn ghost">Close</button>
       <button type="button" class="btn primary" id="wSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Trip map -->
+<dialog id="mapDlg" class="dlg wide">
+  <form method="dialog">
+    <div class="map-head"><h2>Trip map</h2><span class="hint" id="mapInfo"></span><button value="cancel" class="btn ghost">Close</button></div>
+    <div class="map-wrap"><div id="map"></div><ul class="map-trips" id="mapTrips"></ul></div>
+  </form>
+</dialog>
+
+<!-- Status -->
+<dialog id="statusDlg" class="dlg">
+  <form method="dialog">
+    <h2>Status</h2>
+    <div id="statusBody"></div>
+    <div class="dlg-actions">
+      <button type="button" class="btn ghost" id="statusRefresh">Refresh</button>
+      <button value="cancel" class="btn">Close</button>
     </div>
   </form>
 </dialog>

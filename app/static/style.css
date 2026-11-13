@@ -280,3 +280,37 @@ code { background: var(--bg); padding: 0 4px; border-radius: 3px; font-size: 11p
 .version { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 7px; }
 .thumb.rejected img { opacity: .45; filter: grayscale(.6); }
 .thumb .cull { position: absolute; left: 4px; bottom: 22px; background: #b91c1ccc; color: #fff; border-radius: 4px; padding: 0 5px; font-size: 10px; }
+
+/* Trip map */
+.dlg.wide { width: min(1200px, calc(100vw - 32px)); }
+.map-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.map-head h2 { margin: 0; }
+.map-head .btn { margin-left: auto; }
+.map-wrap { display: grid; grid-template-columns: 1fr 220px; gap: 10px; height: min(70vh, 720px); }
+#map { border-radius: var(--radius); background: var(--bg-3); min-height: 300px; }
+.map-trips { list-style: none; margin: 0; padding: 0; overflow: auto; }
+.map-trips li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.map-trips li:hover { background: var(--bg-3); }
+.map-trips .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.map-trips .n { margin-left: auto; color: var(--muted); }
+.map-pop { color: #111; text-align: center; }
+.map-pop img { width: 160px; border-radius: 4px; display: block; margin-bottom: 4px; }
+.map-msg { padding: 40px; text-align: center; color: var(--muted); }
+@media (max-width: 720px) { .map-wrap { grid-template-columns: 1fr; height: auto; } #map { height: 55vh; } }
+
+/* Status */
+.dot.bad { background: var(--danger); }
+.status-problems { list-style: none; padding: 10px 12px; margin: 0 0 12px; border-radius: var(--radius); background: #f871711a; border: 1px solid #f8717155; }
+.status-problems li + li { margin-top: 4px; }
+.status-ok { padding: 10px 12px; margin: 0 0 12px; border-radius: var(--radius); background: #4ade801a; border: 1px solid #4ade8055; }
+.status-grid { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; }
+.status-grid dt { color: var(--muted); }
+.status-grid dd { margin: 0; }
+.meter { height: 6px; border-radius: 3px; background: var(--bg-3); overflow: hidden; margin-top: 3px; max-width: 260px; }
+.meter i { display: block; height: 100%; background: var(--accent); }
+.meter i.low { background: var(--danger); }
+
+/* Notifications */
+.notify-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 12px 10px; margin: 12px 0; }
+.notify-box legend { padding: 0 4px; }
+.notify-box input:not([type=checkbox]) { width: 100%; }

@@ -3,6 +3,32 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.57 – 2026-11-13
+
+- **Trip map:** *Map* in the top bar shows every shot with a GPS position on satellite imagery
+  (or a street map), coloured by trip. Clips show their flight path from the DJI `.SRT`. Click a
+  dot for its thumbnail and *Open in the editor*; click a trip in the list to zoom to it.
+  Positions are read once and remembered. The map library (Leaflet 1.9.4) is bundled with the
+  app; only the map tiles come from the internet.
+- **Notifications:** Automation → *Notify me when a trip is done*. Once a trip is finished
+  (nothing still copying or exporting, its highlight reel made) you get one message:
+  - what was exported and where it went
+  - how many shots were skipped as blurry or duplicate
+  - the reel, any errors, and a few thumbnails
+
+  It is sent by ntfy (phone push), a webhook (Discord, Slack or any JSON receiver) and/or email.
+  Email uses the `SIRIS_SMTP_*` settings in the server's environment. Watch-folder problems
+  (e.g. the NAS isn't mounted) are notified at most once an hour. *Send a test* checks the
+  setup.
+- **Status page:** *Status* shows free space on each NAS folder and the app's data disk,
+  watch-folder health (last check, files waiting, recent errors), notifications, GPU, exports,
+  library counts and the FFmpeg version, with any problems listed at the top. The dot on the
+  button turns red when something needs attention: an unreachable or nearly full (< 20 GB)
+  NAS, a stalled watch folder or failed exports.
+- **Flight telemetry:** DJI `.SRT` files (Mini 3 Pro and older formats) are read for position,
+  altitude and camera settings. Speed and distance from the start are worked out from the
+  positions. This is the groundwork for the flight-data overlay.
+
 ## 1.47 – 2026-11-13
 
 - **Highlight reel:** select a trip's clips and choose *Highlight reel…* to get one video of
