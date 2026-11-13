@@ -1517,7 +1517,7 @@ async function init() {
   buildPanel();
   renderPresetGrid();
   initLibrary(); initDrop(); initBrowser(); initExport(); initJobs(); initViewer(); initCropDrag(); initTimeline();
-  initAutomation(); initBatchTools(); showGpu();
+  initAutomation(); initBatchTools(); initMap(); initStatus(); showGpu();
   const unavailable = state.cfg.output_roots.filter((r) => !r.available);
   if (unavailable.length) toast(`Export folder “${unavailable[0].name}” is not reachable – is the NAS mounted?`, "error");
   await loadLibrary();
@@ -1555,6 +1555,7 @@ async function openAutomation() {
   $("#wDelete").checked = w.delete_originals;
   $("#wTrips").checked = w.trip_folders;
   $("#wCull").checked = w.cull;
+  loadNotify().catch((e) => toast(e.message, "error"));
   $("#wMatch").checked = w.match;
   $("#wReel").checked = w.reel;
   $("#wReelLen").value = String(w.reel_length);
@@ -1588,6 +1589,7 @@ function initAutomation() {
         reel: $("#wReel").checked, reel_length: +$("#wReelLen").value,
       });
       state.cfg.settings.watch = r.settings;
+      await saveNotify();
       renderWatchLog(r.status);
       toast(r.settings.enabled ? `Watching for new files${r.skipped_existing ? ` (${r.skipped_existing} existing file(s) left alone)` : ""}` : "Watch folder turned off");
     } catch (e) { toast(e.message, "error"); }
@@ -1606,6 +1608,183 @@ function initAutomation() {
       if ($("#autoDlg").open) renderWatchLog((await api("GET", "/api/watch")).status);
     } catch (_) { /* server restarting */ }
   }, 15000);
+}
+
+async function loadNotify() {
+  const n = await api("GET", "/api/notify");
+  $("#nEnabled").checked = n.settings.enabled;
+  $("#nNtfy").value = n.settings.ntfy_url; $("#nWebhook").value = n.settings.webhook_url;
+  $("#nEmail").value = n.settings.email_to;
+  $("#nSmtpHint").textContent = n.smtp ? "" : "(the server needs SIRIS_SMTP_HOST etc. – see README)";
+  $("#nTestResult").textContent = "";
+}
+
+function saveNotify() {
+  return api("PUT", "/api/notify", {
+    enabled: $("#nEnabled").checked, ntfy_url: $("#nNtfy").value.trim(),
+    webhook_url: $("#nWebhook").value.trim(), email_to: $("#nEmail").value.trim(),
+  });
+}
+
+function initNotifyTest() {
+  $("#nTest").onclick = async () => {
+    $("#nTestResult").textContent = "Sending…";
+    try {
+      await saveNotify();
+      const r = await api("POST", "/api/notify/test");
+      $("#nTestResult").textContent = Object.entries(r.results).map(([k, v]) => `${k}: ${v}`).join(" · ");
+    } catch (e) { $("#nTestResult").textContent = e.message; }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Trip map (Leaflet, loaded the first time the map is opened)
+// ---------------------------------------------------------------------------
+const LEAFLET = "/static/vendor/leaflet/";  // Leaflet 1.9.4, bundled so the map works without a CDN
+const TRIP_COLOURS = ["#38bdf8", "#f472b6", "#facc15", "#4ade80", "#fb923c", "#a78bfa", "#f87171", "#2dd4bf"];
+let leafletReady = null, tripMap = null;
+
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  leafletReady ||= new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = LEAFLET + "leaflet.css";
+    const js = document.createElement("script");
+    js.src = LEAFLET + "leaflet.js"; js.onload = resolve;
+    js.onerror = () => { leafletReady = null; reject(new Error("Couldn't load the map library")); };
+    document.head.append(css, js);
+  });
+  return leafletReady;
+}
+
+const tripLabel = (key) => key.startsWith("upload:") ? `Uploads ${key.slice(7)}` : key.split(/[\\/]/).pop();
+
+async function openMap() {
+  $("#mapDlg").showModal();
+  $("#mapInfo").textContent = "Loading…";
+  let data;
+  try {
+    [data] = await Promise.all([api("GET", "/api/map"), loadLeaflet()]);
+  } catch (e) {
+    $("#map").innerHTML = `<div class="map-msg">${escapeHtml(e.message)}</div>`;
+    $("#mapInfo").textContent = "";
+    return;
+  }
+  if (!tripMap) {
+    $("#map").innerHTML = "";
+    tripMap = L.map("map", { worldCopyJump: true });
+    const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Imagery © Esri" });
+    const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      { maxZoom: 19, attribution: "© OpenStreetMap contributors" });
+    sat.addTo(tripMap);
+    L.control.layers({ Satellite: sat, Map: osm }).addTo(tripMap);
+    tripMap.shots = L.layerGroup().addTo(tripMap);
+  }
+  setTimeout(() => tripMap.invalidateSize(), 60);
+  tripMap.shots.clearLayers();
+  const trips = {};
+  for (const s of data.shots) (trips[s.trip] ||= []).push(s);
+  const keys = Object.keys(trips).sort();
+  const colour = {}, bounds = {};
+  keys.forEach((k, i) => { colour[k] = TRIP_COLOURS[i % TRIP_COLOURS.length]; bounds[k] = L.latLngBounds([]); });
+  const tripOf = {};
+  for (const s of data.shots) {
+    tripOf[s.id] = s.trip;
+    const m = L.circleMarker([s.lat, s.lon], {
+      radius: s.kind === "video" ? 8 : 6, color: s.kind === "video" ? "#fff" : colour[s.trip],
+      weight: s.kind === "video" ? 2 : 1, fillColor: colour[s.trip], fillOpacity: s.rejected ? 0.3 : 0.9,
+    });
+    m.bindPopup(`<div class="map-pop"><img src="/api/media/${s.id}/thumb" alt=""><b>${escapeHtml(s.name)}</b><br>
+      <a href="#" data-open="${s.id}">Open in the editor</a></div>`);
+    m.addTo(tripMap.shots);
+    bounds[s.trip].extend([s.lat, s.lon]);
+  }
+  for (const [id, path] of Object.entries(data.tracks)) {
+    const t = tripOf[id];
+    L.polyline(path, { color: t ? colour[t] : "#fff", weight: 3, opacity: 0.85 }).addTo(tripMap.shots);
+    if (t) bounds[t].extend(path);
+  }
+  $("#mapTrips").innerHTML = keys.map((k) => `<li data-trip="${escapeHtml(k)}"><span class="sw" style="background:${colour[k]}"></span>${escapeHtml(tripLabel(k))}<span class="n">${trips[k].length}</span></li>`).join("");
+  const all = L.latLngBounds([]);
+  keys.forEach((k) => all.extend(bounds[k]));
+  if (all.isValid()) tripMap.fitBounds(all, { padding: [30, 30], maxZoom: 16 });
+  else tripMap.setView([0, 0], 2);
+  $("#mapInfo").textContent = data.shots.length
+    ? `${data.shots.length} shot(s) in ${keys.length} trip(s) · ${Object.keys(data.tracks).length} flight path(s)`
+    : "No shots with a GPS position yet";
+  tripMap.tripBounds = bounds;
+}
+
+function initMap() {
+  $("#mapBtn").onclick = openMap;
+  $("#mapTrips").onclick = (e) => {
+    const li = e.target.closest("li[data-trip]");
+    const b = li && tripMap?.tripBounds[li.dataset.trip];
+    if (b?.isValid()) tripMap.fitBounds(b, { padding: [30, 30], maxZoom: 17 });
+  };
+  $("#map").addEventListener("click", async (e) => {
+    const a = e.target.closest("[data-open]");
+    if (!a) return;
+    e.preventDefault();
+    $("#mapDlg").close();
+    state.filter = "all";
+    document.querySelectorAll("[data-f]").forEach((b) => b.classList.toggle("on", b.dataset.f === "all"));
+    renderLibrary();
+    await selectItem(a.dataset.open);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+const fmtGB = (b) => `${(b / 1e9).toFixed(b < 1e11 ? 1 : 0)} GB`;
+const fmtAgo = (t) => {
+  if (!t) return "never";
+  const s = Date.now() / 1000 - t;
+  return s < 90 ? "just now" : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
+};
+
+async function refreshStatus(show) {
+  const s = await api("GET", "/api/status");
+  $("#statusDot").hidden = false;
+  $("#statusDot").classList.toggle("bad", !s.ok);
+  $("#statusBtn").title = s.ok ? "All good" : s.problems.join("\n");
+  if (!show) return;
+  const space = (r) => r.available
+    ? `${fmtGB(r.free)} free of ${fmtGB(r.total)}<div class="meter"><i class="${r.free < 20e9 ? "low" : ""}" style="width:${Math.round(100 * (1 - r.free / r.total))}%"></i></div>`
+    : `<span class="err">not reachable</span>`;
+  const rows = [
+    ...s.outputs.map((r) => [`Export: ${escapeHtml(r.name)}`, space(r)]),
+    ...s.inputs.map((r) => [`NAS: ${escapeHtml(r.name)}`, space(r)]),
+    ["App data", space(s.data)],
+    ["Watch folder", s.watch.enabled
+      ? `On · checked ${fmtAgo(s.watch.last_scan)} · ${s.watch.processed} file(s) handled${s.watch.waiting ? ` · ${s.watch.waiting} copying` : ""}`
+      : "Off"],
+    ["Notifications", s.notify.enabled && s.notify.channels.length ? `On (${s.notify.channels.join(", ")})` + (s.notify.recent[0] ? ` · last: ${escapeHtml(s.notify.recent[0].title)} ${fmtAgo(s.notify.recent[0].at)}` : "") : "Off"],
+    ["GPU", s.gpu.available ? `${escapeHtml(s.gpu.name)} (NVENC${s.gpu.decode ? " + NVDEC" : ""})` : `None – ${escapeHtml(s.gpu.reason || "CPU encoding")}`],
+    ["Exports", `${s.jobs.running} running · ${s.jobs.queued} queued · ${s.jobs.error} failed`],
+    ["Library", `${s.library.photos} photos (${s.library.rejected} rejected) · ${s.library.videos} videos`],
+    ["FFmpeg", escapeHtml(s.ffmpeg)],
+    ["Version", `v${s.version} · up ${fmtAgo(Date.now() / 1000 - s.uptime).replace(" ago", "")}`],
+  ];
+  $("#statusBody").innerHTML = (s.ok
+    ? `<div class="status-ok">Everything looks fine.</div>`
+    : `<ul class="status-problems">${s.problems.map((p) => `<li>⚠ ${escapeHtml(p)}</li>`).join("")}</ul>`)
+    + `<dl class="status-grid">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`
+    + (s.watch.errors.length ? `<h3 class="hint">Recent watch-folder messages</h3><ul class="jobs">${s.watch.errors.map((e) => `<li><span class="err">${new Date(e.at * 1000).toLocaleString()} · ${escapeHtml(e.message)}</span></li>`).join("")}</ul>` : "");
+}
+
+function initStatus() {
+  initNotifyTest();
+  $("#statusBtn").onclick = async () => {
+    $("#statusBody").innerHTML = `<p class="hint">Checking…</p>`;
+    $("#statusDlg").showModal();
+    try { await refreshStatus(true); } catch (e) { $("#statusBody").innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+  };
+  $("#statusRefresh").onclick = () => refreshStatus(true).catch((e) => toast(e.message, "error"));
+  refreshStatus(false).catch(() => {});
+  setInterval(() => refreshStatus(false).catch(() => {}), 60000);
 }
 
 function selectedPhotos() {

@@ -5,6 +5,7 @@ SIRIS_OUTPUT_ROOTS  Export destinations, e.g. "NAS=/mnt/nas/Drone;Local=/home/me
 SIRIS_INPUT_ROOTS   Folders you can import media from without uploading,
                     e.g. "NAS Raw=/mnt/nas/DroneRaw"
 SIRIS_USER / SIRIS_PASSWORD   Optional HTTP basic auth for the web UI
+SIRIS_SMTP_*        Mail server for email notifications (see notify.py)
 """
 from __future__ import annotations
 

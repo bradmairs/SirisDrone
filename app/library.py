@@ -20,6 +20,17 @@ THUMB_EDGE = 420
 FRAME_EDGE = 3840
 
 
+TYPE_FOLDERS = ("dng", "jpeg", "jpg", "raw", "videos", "video", "mp4", "photos")
+
+
+def trip_folder(path: Path) -> str:
+    """A file's trip: its folder, ignoring a DNG/, JPEG/ or Videos/ level."""
+    parent = Path(path).parent
+    while parent.name.lower() in TYPE_FOLDERS:
+        parent = parent.parent
+    return str(parent)
+
+
 def media_kind(name: str) -> str | None:
     ext = Path(name).suffix.lower()
     if ext in render.PHOTO_EXTS:
@@ -134,6 +145,25 @@ class Library:
             self._write_meta(item)
         return item
 
+    def ensure_gps(self, item: dict) -> dict:
+        """Where the shot was taken, (lat, lon) as item["gps"] ([] when unknown), stored once."""
+        if "gps" in item:
+            return item
+        gps = None
+        try:
+            src = self.source_path(item)
+            if item["kind"] == "photo":
+                with Image.open(src) as im:
+                    gps = geo.gps_from_exif(im.getexif().tobytes())
+            else:
+                gps = geo.gps_for_video(src, item)
+        except Exception:
+            gps = None
+        try:
+            return self.update_meta(item["id"], gps=[round(gps[0], 6), round(gps[1], 6)] if gps else [])
+        except KeyError:
+            return item
+
     def ensure_features(self, item: dict) -> dict:
         """Culling measurements for a photo (see culling.py), computed once and stored."""
         if item["kind"] != "photo" or item.get("cull_features"):
@@ -150,16 +180,12 @@ class Library:
             return item
         return self.update_meta(item["id"], cull_features=f)
 
-    _TYPE_FOLDERS = ("dng", "jpeg", "jpg", "raw", "videos", "video", "mp4", "photos")
 
     def trip_key(self, item: dict) -> str:
         """Which trip a shot belongs to, for culling: its NAS folder (ignoring a JPEG/, DNG/ or
         Videos/ level), or for uploads the day it was taken."""
         if item["source"] == "linked":
-            parent = Path(item["path"]).parent
-            while parent.name.lower() in self._TYPE_FOLDERS:
-                parent = parent.parent
-            return str(parent)
+            return trip_folder(Path(item["path"]))
         t = (item.get("cull_features") or {}).get("time")
         return "upload:" + (time.strftime("%Y-%m-%d", time.localtime(t)) if t else "undated")
 

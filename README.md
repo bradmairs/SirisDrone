@@ -23,6 +23,9 @@ Apple TV 4K screensaver.
 | **Smart culling** | Flags blurry shots and near-duplicates (bursts and repeats taken within a few seconds) trip by trip, keeping the crispest of each group. Rejects are dimmed with a reason badge and listed under *Rejected*; *Keep* / *Reject* overrides any verdict. The watch folder doesn't export rejects (or delete their originals), and *Export → All* skips them. |
 | **Highlight reel** | Select a trip's clips and choose *Highlight reel…*: the steadiest, sharpest seconds of each are cut together in shooting order with crossfades, after a title card with the place and date, and with the BRM Highlife stamp. Apple TV 4K or full resolution, 30 s – 2 min. Automation can make one per trip. |
 | **Match colours** | Evens out exposure and white balance across a trip's shots (nudged towards the trip's median through each shot's own sliders, within limits), so a set of photos or a reel doesn't jump in brightness or colour. Automation does this for every trip by default. |
+| **Trip map** | *Map* shows every shot with a GPS position on satellite imagery or a street map, coloured by trip, with each clip's flight path from its DJI `.SRT`. Click a dot for its thumbnail and open it in the editor. The map library is bundled; only the map tiles need internet. |
+| **Notifications** | When the watch folder finishes a trip you get a summary: what was exported, what was skipped as blurry or duplicate, the highlight reel, any errors and a few thumbnails. It goes to your phone by [ntfy](https://ntfy.sh), to Discord/Slack or any webhook, and/or by email. Problems such as an unmounted NAS are notified too, at most hourly. |
+| **Status** | One page for NAS free space, watch-folder health, GPU, failed exports and recent problems. The dot on *Status* turns red when something needs attention. |
 | **Location stamp** | "City, Country" (e.g. *Cowes, Australia*) bottom-left, looked up from the photo/video GPS (EXIF, video metadata or the DJI `.SRT`) via OpenStreetMap when the file is added. Smaller than the BRM Highlife stamp, black or white for contrast; edit the text, size and colour in *Location Stamp*. |
 | **One-click exports** | **Apple TV 4K** (3840 × 2160 HEVC 10-bit, maximum quality, source frame rate up to 60 fps, `hvc1`-tagged for Apple devices) and **Full resolution**. |
 | **NVIDIA GPU** | Video is decoded (NVDEC) and encoded (NVENC H.264 / HEVC 10-bit) on the GPU, including exports, playback previews and hyperlapses. The top bar shows which GPU is in use. If the GPU is missing or busy, the job is redone on the CPU automatically. The colour-grading and stamp filters always run on the CPU, because FFmpeg has no GPU version of them. |
@@ -105,6 +108,7 @@ Then open <http://localhost:8080>.
 | `SIRIS_USER`, `SIRIS_PASSWORD` | Turn on a password prompt for the web UI. Set this if the app can be reached from outside your home network. | off |
 | `SIRIS_GPU` | `off` forces CPU video encoding. | auto |
 | `SIRIS_GEOCODER` | `off` disables `{place}` lookups, or a URL for your own Nominatim server. | OpenStreetMap |
+| `SIRIS_SMTP_HOST`, `SIRIS_SMTP_PORT`, `SIRIS_SMTP_USER`, `SIRIS_SMTP_PASSWORD`, `SIRIS_SMTP_FROM` | Mail server for email notifications (port 587 = STARTTLS, 465 = SSL). For Gmail use an app password. The password is only read from the environment. ntfy and webhook notifications need none of this. | off |
 
 The app can only read and write inside these folders.
 

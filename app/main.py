@@ -5,7 +5,9 @@ import base64
 import json
 import secrets
 import shutil
+import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -13,7 +15,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import analysis, culling, geo, gpu, grading, jobs, recipes, reel, render, tripmatch, video
+from . import analysis, culling, geo, gpu, grading, jobs, notify, recipes, reel, render, telemetry, tripmatch, video
 from . import __version__
 from .playback import Playback
 from .config import DEFAULT_STAMP, STATIC_DIR, Config, resolve_in_root
@@ -34,6 +36,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     queue = jobs.JobQueue()
     playback = Playback()
     app = FastAPI(title="SirisDrone Studio", version=__version__, docs_url="/api/docs")
+    started_at = time.time()
     app.state.cfg, app.state.lib, app.state.jobs = cfg, lib, queue
     app.state.playback = playback
 
@@ -56,7 +59,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         presets = {str(k)[:60]: grading.normalize_grade(v)
                    for k, v in (s.get("presets") or {}).items() if isinstance(v, dict)}
         return {"export": export, "default_edit": normalize_edit(s.get("default_edit")),
-                "presets": presets, "watch": normalize_watch(s.get("watch"))}
+                "presets": presets, "watch": normalize_watch(s.get("watch")),
+                "notify": notify.normalize_notify(s.get("notify"))}
 
     def save_settings(s: dict) -> dict:
         cur = load_settings()
@@ -68,6 +72,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             cur["presets"] = s["presets"]
         if "watch" in s:
             cur["watch"] = normalize_watch({**cur["watch"], **(s["watch"] or {})})
+        if "notify" in s:
+            cur["notify"] = notify.normalize_notify({**cur["notify"], **(s["notify"] or {})})
         cfg.settings_file.write_text(json.dumps(cur, indent=1))
         return load_settings()
 
@@ -593,6 +599,114 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def clear_jobs():
         queue.clear_finished()
         return {"ok": True}
+
+    # -- notifications ----------------------------------------------------------------
+    def notify_info() -> dict:
+        n = load_settings()["notify"]
+        return {"settings": n, "channels": notify.channels(n), "smtp": bool(notify.smtp_settings()),
+                "recent": watcher.status["notifications"]}
+
+    @app.get("/api/notify")
+    def get_notify():
+        return notify_info()
+
+    @app.put("/api/notify")
+    def put_notify(body: dict = Body(...)):
+        save_settings({"notify": body})
+        return notify_info()
+
+    @app.post("/api/notify/test")
+    def test_notify():
+        n = load_settings()["notify"]
+        if not notify.channels(n):
+            raise HTTPException(400, "Add an ntfy topic, a webhook or an email address first"
+                                + ("" if notify.smtp_settings() else " (email also needs SIRIS_SMTP_HOST)"))
+        thumbs = []
+        for it in lib.list()[:3]:
+            try:
+                thumbs.append((f"{Path(it['name']).stem}.jpg", lib.thumb_path(it["id"]).read_bytes()))
+            except OSError:
+                pass
+        results = notify.send({**n, "enabled": True}, "SirisDrone test",
+                              "Notifications are working. You'll hear from SirisDrone when a trip is done.",
+                              thumbs, {"test": True})
+        return {"results": results}
+
+    # -- status page ------------------------------------------------------------------
+    def disk(path: Path) -> dict:
+        try:
+            u = shutil.disk_usage(path)
+            return {"available": True, "free": u.free, "total": u.total}
+        except OSError:
+            return {"available": False}
+
+    def ffmpeg_version() -> str:
+        try:
+            out = subprocess.run([video.FFMPEG, "-version"], capture_output=True, text=True, timeout=10).stdout
+            return out.split("\n", 1)[0].replace("ffmpeg version ", "").split(" Copyright")[0]
+        except (OSError, subprocess.SubprocessError):
+            return "not found"
+
+    @app.get("/api/status")
+    def status():
+        """Health at a glance: NAS space, watch folder, GPU, exports and recent problems."""
+        w = load_settings()["watch"]
+        items = lib.list()
+        job_list = queue.list()
+        failed = [j for j in job_list if j["status"] == "error"]
+        problems = []
+        outputs = [{"name": n, "path": str(p), **(disk(p) if p.is_dir() else {"available": False})}
+                   for n, p in cfg.output_roots.items()]
+        inputs = [{"name": n, "path": str(p), **(disk(p) if p.is_dir() else {"available": False})}
+                  for n, p in cfg.input_roots.items()]
+        for r in outputs + inputs:
+            if not r["available"]:
+                problems.append(f"{r['name']} ({r['path']}) isn't reachable – is the NAS mounted?")
+            elif r["free"] < 20e9:
+                problems.append(f"{r['name']} has only {r['free'] / 1e9:.1f} GB free")
+        st = watcher.status
+        recent_errors = [e for e in st["errors"] if time.time() - e["at"] < 24 * 3600]
+        if w["enabled"]:
+            if st["last_scan"] is None or time.time() - st["last_scan"] > max(3 * w["interval"], 300):
+                problems.append("The watch folder hasn't been checked recently")
+            if recent_errors:
+                problems.append(f"Watch folder: {recent_errors[0]['message']}")
+        if failed:
+            problems.append(f"{len(failed)} export(s) failed – latest: {failed[-1]['name']}: {failed[-1]['error']}")
+        g = gpu.detect()
+        return {
+            "version": __version__, "uptime": time.time() - started_at, "ok": not problems,
+            "problems": problems, "gpu": g, "ffmpeg": ffmpeg_version(),
+            "outputs": outputs, "inputs": inputs, "data": {"path": str(cfg.data_dir), **disk(cfg.data_dir)},
+            "library": {"photos": sum(i["kind"] == "photo" for i in items),
+                        "videos": sum(i["kind"] == "video" for i in items),
+                        "rejected": sum(i["kind"] == "photo" and culling.effective(i) == "reject" for i in items)},
+            "jobs": {s: sum(j["status"] == s for j in job_list) for s in ("queued", "running", "done", "error")},
+            "watch": {"enabled": w["enabled"], "last_scan": st["last_scan"], "waiting": st["waiting"],
+                      "processed": st["processed"], "errors": recent_errors[:5]},
+            "notify": {"enabled": load_settings()["notify"]["enabled"],
+                       "channels": notify.channels(load_settings()["notify"]),
+                       "recent": st["notifications"][:5]},
+        }
+
+    # -- trip map ---------------------------------------------------------------------
+    @app.get("/api/map")
+    def trip_map():
+        """Every shot with a known position, grouped by trip, plus each clip's flight path."""
+        shots, tracks = [], {}
+        for it in lib.list():
+            it = lib.ensure_gps(it)
+            if it["kind"] == "video":
+                rows = telemetry.load(lib.source_path(it)) if it["source"] == "linked" else []
+                path = telemetry.track(rows)
+                if len(path) > 1:
+                    tracks[it["id"]] = path
+            if not it.get("gps"):
+                continue
+            shots.append({"id": it["id"], "name": it["name"], "kind": it["kind"], "lat": it["gps"][0],
+                          "lon": it["gps"][1], "trip": lib.trip_key(it),
+                          "rejected": culling.effective(it) == "reject"})
+        return {"shots": shots, "tracks": tracks}
 
     @app.exception_handler(KeyError)
     async def key_error(request: Request, exc: KeyError):
