@@ -32,9 +32,10 @@
   <aside class="library" id="library">
     <div class="lib-head">
       <div class="seg" id="libFilter">
-        <button data-f="all" class="on">All</button><button data-f="photo">Photos</button><button data-f="video">Videos</button>
+        <button data-f="all" class="on">All</button><button data-f="photo">Photos</button><button data-f="video">Videos</button><button data-f="rejected" title="Blurry shots and near-duplicates the culling flagged">Rejected</button>
       </div>
       <button class="link" id="selectAllBtn">Select all</button>
+      <button class="link" id="cullBtn" title="Flag blurry photos and near-duplicates (bursts), keeping the best of each group">Cull photos</button>
     </div>
     <div class="upload-progress" id="uploadProgress" hidden><div class="bar"><i></i></div><span></span></div>
     <div class="thumbs" id="thumbs"></div>
@@ -44,6 +45,8 @@
     </div>
     <div class="lib-foot" id="libFoot" hidden>
       <span id="selCount">0 selected</span>
+      <button class="link" id="keepBtn" title="Keep these even if culling flagged them">Keep</button>
+      <button class="link" id="rejectBtn" title="Mark as rejected: skipped by Export → All and by automation">Reject</button>
       <button class="link" id="syncBtn">Apply settings…</button>
       <button class="link" id="hdrBtn" title="Merge an exposure bracket (AEB) into one HDR photo">Merge HDR</button>
       <button class="link" id="hlBtn" title="Make a video from a photo sequence">Hyperlapse…</button>
@@ -224,6 +227,7 @@
       <label class="chk"><input type="checkbox" id="wExposure"> Auto exposure</label>
       <label class="chk"><input type="checkbox" id="wRecursive"> Include sub-folders</label>
       <label class="chk"><input type="checkbox" id="wExisting"> Also process files already in the folder</label>
+      <label class="chk" title="Blurry shots and lesser near-duplicates stay in the library as Rejected instead of being exported"><input type="checkbox" id="wCull"> Skip blurry &amp; duplicate photos</label>
       <label class="chk" title="A trip folder copied into the watch folder gets its own folder of edits; loose files are grouped by the day they were taken"><input type="checkbox" id="wTrips"> A folder per trip</label>
     </div>
     <label class="chk" title="For when the watch folder holds copies of originals kept elsewhere"><input type="checkbox" id="wDelete"> Delete each file from the watch folder once it's exported</label>

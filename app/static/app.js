@@ -926,7 +926,11 @@ async function grabFrame() {
 // ---------------------------------------------------------------------------
 // library
 // ---------------------------------------------------------------------------
+// Culling result for an item, with the user's keep/reject override winning.
+const cullStatus = (i) => i.cull_override || i.cull?.status || "keep";
+
 function visibleItems() {
+  if (state.filter === "rejected") return state.items.filter((i) => cullStatus(i) === "reject");
   return state.items.filter((i) => state.filter === "all" || i.kind === state.filter);
 }
 
@@ -937,10 +941,12 @@ function renderLibrary() {
     const t = el(`<div class="thumb" data-id="${it.id}" title="${escapeHtml(it.name)}">
         <img loading="lazy" src="/api/media/${it.id}/thumb" alt="">
         <span class="sel">✓</span>
+        ${cullStatus(it) === "reject" ? `<span class="cull" title="Rejected: ${escapeHtml(it.cull_override === "reject" ? "by you" : it.cull?.reason || "")}">✕ ${it.cull_override === "reject" ? "rejected" : escapeHtml((it.cull?.reason || "").startsWith("duplicate") ? "duplicate" : it.cull?.reason || "")}</span>` : ""}
         ${it.kind === "video" ? `<span class="kind">▶ ${fmtTime(it.duration).replace(/\.\d$/, "")}</span>` : ""}
         <div class="meta"><span>${escapeHtml(it.name)}</span>${it.source === "linked" ? "<span>NAS</span>" : ""}</div></div>`);
     t.classList.toggle("active", state.current?.id === it.id);
     t.classList.toggle("selected", state.selected.has(it.id));
+    t.classList.toggle("rejected", cullStatus(it) === "reject");
     box.append(t);
   }
   $("#libEmpty").hidden = state.items.length > 0;
@@ -984,6 +990,23 @@ function initLibrary() {
     vis.forEach((i) => (all ? state.selected.delete(i.id) : state.selected.add(i.id)));
     renderLibrary();
   };
+  $("#cullBtn").onclick = async () => {
+    const ids = state.selected.size ? [...state.selected] : null;
+    $("#cullBtn").disabled = true;
+    try {
+      const r = await api("POST", "/api/cull", ids ? { media_ids: ids } : {});
+      const n = Object.keys(r.rejected).length;
+      toast(`Checked ${r.checked} photo(s): ${n} flagged as blurry or duplicate${n ? " – see Rejected" : ""}`);
+      await loadLibrary();
+    } catch (e) { toast(e.message, "error"); } finally { $("#cullBtn").disabled = false; }
+  };
+  const override = async (value) => {
+    for (const id of state.selected) await api("PUT", `/api/media/${id}/cull`, { override: value });
+    toast(value === "keep" ? `Keeping ${state.selected.size} item(s)` : `Rejected ${state.selected.size} item(s)`);
+    await loadLibrary();
+  };
+  $("#keepBtn").onclick = () => override("keep");
+  $("#rejectBtn").onclick = () => override("reject");
   $("#removeBtn").onclick = async () => {
     const n = state.selected.size;
     if (!confirm(`Remove ${n} item(s) from the library?\n\nUploaded copies are deleted. Files imported from the NAS are left untouched.`)) return;
@@ -1257,7 +1280,8 @@ function openExport() {
 
 function exportIds() {
   return exportScope === "current" ? [state.current?.id].filter(Boolean)
-    : exportScope === "selected" ? [...state.selected] : state.items.map((i) => i.id);
+    : exportScope === "selected" ? [...state.selected]
+    : state.items.filter((i) => cullStatus(i) !== "reject").map((i) => i.id);  // All skips rejects
 }
 
 function renderQuick() {
@@ -1530,6 +1554,7 @@ async function openAutomation() {
   $("#wRecursive").checked = w.recursive; $("#wExisting").checked = w.process_existing;
   $("#wDelete").checked = w.delete_originals;
   $("#wTrips").checked = w.trip_folders;
+  $("#wCull").checked = w.cull;
   renderWatchLog(status);
   $("#autoDlg").showModal();
 }
@@ -1556,7 +1581,7 @@ function initAutomation() {
         photos: $("#wPhotos").value, videos: $("#wVideos").value, auto_level: $("#wLevel").checked,
         auto_exposure: $("#wExposure").checked, recursive: $("#wRecursive").checked,
         process_existing: $("#wExisting").checked, delete_originals: $("#wDelete").checked,
-        trip_folders: $("#wTrips").checked,
+        trip_folders: $("#wTrips").checked, cull: $("#wCull").checked,
       });
       state.cfg.settings.watch = r.settings;
       renderWatchLog(r.status);

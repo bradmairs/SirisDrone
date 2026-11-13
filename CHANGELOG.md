@@ -3,6 +3,20 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.37 – 2026-11-13
+
+- **Smart culling:** photos are checked for blur (how wide the sharpest edges are, so a calm
+  sea with a crisp horizon still counts as sharp) and for near-duplicates (shots that look the
+  same and were taken within 8 seconds, or with neighbouring file numbers). In each burst the
+  crispest, least clipped shot is kept; the rest are marked "duplicate of …", and smeared shots
+  "blurry". Trips are judged on their own, so new shots are compared with earlier ones.
+- **Rejected tab and badges:** rejected photos are dimmed with a red reason badge and listed
+  under a new *Rejected* filter. *Cull photos* re-checks the selection (or everything), and
+  *Keep* / *Reject* overrides the verdict for the selected photos.
+- **Automation skips rejects:** with *Skip blurry & duplicate photos* on (the default), the
+  watch folder culls each scan's photos before exporting. Rejects stay in the library and their
+  originals are never deleted, even with *Delete originals* on. *Export… → All* skips them too.
+
 ## 1.27 – 2026-11-13
 
 - **Automatic checks on GitHub:** every pull request and every push to `main` runs the full test
