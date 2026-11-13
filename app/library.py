@@ -12,7 +12,7 @@ from typing import BinaryIO
 
 from PIL import Image
 
-from . import geo, render, video
+from . import culling, geo, render, video
 from .edits import normalize_edit
 
 PROXY_EDGE = 2048
@@ -118,7 +118,50 @@ class Library:
             self.make_thumb(item)
         except Exception:
             pass  # preview will surface the problem; keep the item
+        if kind == "photo":
+            item = self.ensure_features(item)
         return item
+
+    def update_meta(self, mid: str, **fields) -> dict:
+        """Change some of an item's stored fields (None removes one)."""
+        with self._lock:
+            item = self.get(mid)
+            for k, v in fields.items():
+                if v is None:
+                    item.pop(k, None)
+                else:
+                    item[k] = v
+            self._write_meta(item)
+        return item
+
+    def ensure_features(self, item: dict) -> dict:
+        """Culling measurements for a photo (see culling.py), computed once and stored."""
+        if item["kind"] != "photo" or item.get("cull_features"):
+            return item
+        try:
+            exif = None
+            with Image.open(self.source_path(item)) as im:
+                exif = im.getexif().tobytes()
+        except Exception:
+            pass
+        try:
+            f = culling.features(self.proxy(item), exif, item["name"])
+        except Exception:
+            return item
+        return self.update_meta(item["id"], cull_features=f)
+
+    _TYPE_FOLDERS = ("dng", "jpeg", "jpg", "raw", "videos", "video", "mp4", "photos")
+
+    def trip_key(self, item: dict) -> str:
+        """Which trip a shot belongs to, for culling: its NAS folder (ignoring a JPEG/, DNG/ or
+        Videos/ level), or for uploads the day it was taken."""
+        if item["source"] == "linked":
+            parent = Path(item["path"]).parent
+            while parent.name.lower() in self._TYPE_FOLDERS:
+                parent = parent.parent
+            return str(parent)
+        t = (item.get("cull_features") or {}).get("time")
+        return "upload:" + (time.strftime("%Y-%m-%d", time.localtime(t)) if t else "undated")
 
     def detect_location(self, item: dict) -> str:
         """"City, Country" from the photo's EXIF GPS or the video's GPS (metadata or DJI .SRT)."""

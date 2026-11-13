@@ -5,6 +5,10 @@ edit (BRM Blue, stamp, level horizon, exposure; D-Cinelike look for 10-bit video
 exported with a recipe: photos → full-resolution JPEG, videos → Apple TV 4K.
 Files still being copied are left alone until their size stops changing.
 
+With `cull` on, each scan's new photos are culled (with the rest of their trip) before export:
+blurry shots and lesser near-duplicates are kept in the library, marked rejected, and neither
+exported nor deleted. An item's keep/reject override in the library wins.
+
 With `delete_originals` on, a file picked up while it is on is deleted from the watch folder
 (and dropped from the library) once its export has finished and the exported file exists. For
 when the watch folder holds copies of originals kept elsewhere. Failed or cancelled exports,
@@ -20,7 +24,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import jobs, recipes
+from . import culling, jobs, recipes
 from .config import resolve_in_root
 from .library import media_kind
 
@@ -39,6 +43,7 @@ DEFAULT_WATCH = {
     "process_existing": False,
     "delete_originals": False,  # delete each picked-up file once its export is done
     "trip_folders": True,     # export into a folder per trip (see export_subfolder)
+    "cull": True,             # don't export blurry shots or near-duplicates (see culling.py)
 }
 PHOTO_ACTIONS = ("full", "skip")
 VIDEO_ACTIONS = ("appletv", "full", "skip")
@@ -47,7 +52,7 @@ VIDEO_ACTIONS = ("appletv", "full", "skip")
 def normalize_watch(w: dict | None) -> dict:
     o = {**DEFAULT_WATCH, **{k: v for k, v in (w or {}).items() if k in DEFAULT_WATCH}}
     for k in ("enabled", "recursive", "auto_level", "auto_exposure", "process_existing",
-              "delete_originals", "trip_folders"):
+              "delete_originals", "trip_folders", "cull"):
         o[k] = bool(o[k])
     o["photos"] = "skip" if o["photos"] == "skip" else "full"  # Instagram options were removed in 1.1
     o["videos"] = o["videos"] if o["videos"] in VIDEO_ACTIONS else "appletv"
@@ -146,6 +151,7 @@ class Watcher:
             self.status["last_scan"] = time.time()
             self.cleanup(w)
             waiting = 0
+            deferred: list[tuple[str, Path]] = []
             for p in self._files(w):
                 key = str(p)
                 st = p.stat()
@@ -162,15 +168,54 @@ class Watcher:
                 entry = {"size": st.st_size, "mtime": st.st_mtime, "item": None, "at": time.time()}
                 try:
                     entry.update(self.process(p, w))
-                    done += 1
-                    self.status["processed"] += 1
+                    if entry.get("action") == "culling":
+                        deferred.append((key, p))
+                    else:
+                        done += 1
+                        self.status["processed"] += 1
                 except Exception as exc:
                     entry["error"] = str(exc)
                     self._error(f"{p.name}: {exc}")
                 self.seen[key] = entry
-                self.status["recent"] = ([{"name": p.name, **entry}] + self.status["recent"])[:20]
+                if entry.get("action") != "culling":
+                    self.status["recent"] = ([{"name": p.name, **entry}] + self.status["recent"])[:20]
                 self._save()
+            done += self._cull_and_export(deferred, w)
             self.status["waiting"] = waiting
+        return done
+
+    def _cull_and_export(self, deferred: list[tuple[str, Path]], w: dict) -> int:
+        """Cull this scan's photos as a batch, then export the keepers."""
+        if not deferred:
+            return 0
+        items = []
+        for key, _ in deferred:
+            try:
+                items.append(self.lib.get(self.seen[key]["item"]))
+            except KeyError:
+                pass
+        try:
+            culling.cull_library(self.lib, items)
+        except Exception as exc:  # culling must never stop exports
+            self._error(f"Culling failed, exporting everything: {exc}")
+        done = 0
+        for key, path in deferred:
+            entry = self.seen[key]
+            try:
+                item = self.lib.get(entry["item"])
+                if culling.effective(item) == "reject":
+                    reason = (item.get("cull") or {}).get("reason") or "rejected"
+                    entry.update({"action": f"rejected: {reason}"})
+                    entry.pop("delete_after", None)  # never delete a shot we didn't export
+                else:
+                    entry.update(self.export_item(item, self.lib.get_edit(item["id"]), path, w))
+                done += 1
+                self.status["processed"] += 1
+            except Exception as exc:
+                entry["error"] = str(exc)
+                self._error(f"{path.name}: {exc}")
+            self.status["recent"] = ([{"name": path.name, **entry}] + self.status["recent"])[:20]
+        self._save()
         return done
 
     @staticmethod
@@ -202,8 +247,16 @@ class Watcher:
         if action == "skip":
             self.lib.set_edit(item["id"], edit)
             return {"item": item["id"], "action": "edited only"}
-        recipe = action
-        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(recipe, item, edit))
+        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(action, item, edit))
+        if kind == "photo" and w["cull"]:
+            out = {"item": item["id"], "action": "culling"}
+            if w["delete_originals"]:
+                out["delete_after"] = True
+            return out
+        return self.export_item(item, edit, path, w)
+
+    def export_item(self, item: dict, edit: dict, path: Path, w: dict) -> dict:
+        recipe = w["photos"] if item["kind"] == "photo" else w["videos"]
         base = self.get_settings()["export"]
         folder = w["out_folder"]
         if w["trip_folders"]:

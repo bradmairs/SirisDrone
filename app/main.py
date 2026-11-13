@@ -13,7 +13,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import analysis, geo, gpu, grading, jobs, recipes, render, video
+from . import analysis, culling, geo, gpu, grading, jobs, recipes, render, video
 from . import __version__
 from .playback import Playback
 from .config import DEFAULT_STAMP, STATIC_DIR, Config, resolve_in_root
@@ -448,6 +448,26 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                                                               bool(body.get("stabilize", True)),
                                                               bool(body.get("deflicker", True))))
         return {"jobs": [job.public()], "destination": str(dest)}
+
+    # -- culling --------------------------------------------------------------------
+    @app.post("/api/cull")
+    def cull(body: dict = Body(default={})):
+        """Flag blurry shots and near-duplicates among the given photos (default: all), each
+        compared with the rest of its trip. Returns counts and the reasons."""
+        ids = body.get("media_ids")
+        items = [item_or_404(m) for m in ids] if ids else lib.list()
+        results = culling.cull_library(lib, items)
+        rejected = {mid: r["reason"] for mid, r in results.items() if r["status"] == "reject"}
+        return {"checked": len(results), "rejected": rejected}
+
+    @app.put("/api/media/{mid}/cull")
+    def set_cull(mid: str, body: dict = Body(...)):
+        """Override culling: "keep", "reject", or null to go back to the automatic decision."""
+        item_or_404(mid)
+        override = body.get("override")
+        if override not in ("keep", "reject", None):
+            raise HTTPException(400, "override must be keep, reject or null")
+        return lib.update_meta(mid, cull_override=override)
 
     @app.post("/api/media/{mid}/location")
     def detect_location(mid: str):
