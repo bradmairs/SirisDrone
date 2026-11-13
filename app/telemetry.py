@@ -126,6 +126,16 @@ def load(video_path: Path) -> list[dict]:
     return [dict(r) for r in _load(str(srt), srt.stat().st_mtime)]
 
 
+def load_for(source: Path, item_dir: Path | None = None) -> list[dict]:
+    """Telemetry beside the clip, or an .SRT uploaded for it (kept as flight.SRT in its folder)."""
+    rows = load(source)
+    if not rows and item_dir is not None:
+        own = Path(item_dir) / "flight.SRT"
+        if own.exists():
+            rows = [dict(r) for r in _load(str(own), own.stat().st_mtime)]
+    return rows
+
+
 def at(rows: list[dict], t: float) -> dict | None:
     """The sample in effect at `t` seconds into the clip."""
     best = None

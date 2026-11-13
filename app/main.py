@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import analysis, culling, geo, gpu, grading, jobs, notify, recipes, reel, render, telemetry, tripmatch, video
@@ -139,13 +139,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/media/upload")
     def upload(files: list[UploadFile] = File(...)):
         default_edit = load_settings()["default_edit"]
-        added, errors = [], []
-        for f in files:
+        added, errors, flight = [], [], []
+        is_srt = lambda f: (f.filename or "").lower().endswith(".srt")
+        for f in sorted(files, key=is_srt):  # clips before their .SRT flight logs
             try:
-                added.append(lib.add_upload(f.filename or "upload", f.file, default_edit))
+                if is_srt(f):
+                    flight.append(lib.attach_srt(f.filename, f.file)["id"])
+                else:
+                    added.append(lib.add_upload(f.filename or "upload", f.file, default_edit))
             except ValueError as exc:
                 errors.append(str(exc))
-        return {"added": added, "errors": errors}
+        return {"added": added, "errors": errors, "flight": flight}
 
     @app.post("/api/media/import")
     def import_media(body: dict = Body(...)):
@@ -198,6 +202,36 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         item_or_404(mid)
         return lib.set_edit(mid, edit)
 
+    @app.get("/api/media/{mid}/flight")
+    def flight_data(mid: str):
+        """The clip's DJI telemetry summary and twice-a-second samples (for the editor)."""
+        item = item_or_404(mid)
+        rows = lib.flight(item)
+        step, out, last = 0.5, [], -1e9
+        for r in rows:
+            if r["t"] - last >= step:
+                out.append({k: r[k] for k in ("t", "alt", "speed", "dist", "lat", "lon") if k in r})
+                last = r["t"]
+        return {"available": bool(rows), "summary": telemetry.summary(rows) if rows else None,
+                "samples": out}
+
+    @app.get("/api/media/{mid}/history")
+    def edit_history(mid: str):
+        """Earlier versions of the edit, newest first (index counts from the oldest)."""
+        item_or_404(mid)
+        hist = lib.history(mid)
+        return [{"index": i, "at": h["at"], "label": h["label"]} for i, h in reversed(list(enumerate(hist)))]
+
+    @app.post("/api/media/{mid}/history/{index}/restore")
+    def restore_edit(mid: str, index: int):
+        item_or_404(mid)
+        hist = lib.history(mid)
+        if not 0 <= index < len(hist):
+            raise HTTPException(404, "No such version")
+        h = hist[index]
+        when = time.strftime("%d %b %H:%M", time.localtime(h["at"]))
+        return lib.set_edit(mid, h["edit"], f"Restored “{h['label']}” from {when}")
+
     @app.post("/api/media/{mid}/preview")
     def preview(mid: str, body: dict = Body(...)):
         """Render a JPEG preview. mode: "final" (everything) | "frame" (uncropped, for the crop tool)."""
@@ -210,11 +244,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             edit = normalize_edit({"grade": {}, "rotate": edit["rotate"], "flip_h": edit["flip_h"],
                                    "flip_v": edit["flip_v"], "straighten": edit["straighten"],
                                    "crop": edit["crop"], "stamp": {"enabled": False}})
+        if item["kind"] == "video":
+            edit["noise"] = 0  # photo-only: videos use their own noise reduction (FFmpeg)
         try:
             src = lib.preview_source(item, edit if mode != "frame" else
                                      {**edit, "crop": {"x": 0, "y": 0, "w": 1, "h": 1}}, size, t)
             rgb = render.render(src, edit, long_edge=size, mode=mode, fast=True,
                                 stamp_mask=stamp_mask(), allow_upscale=False)
+            if mode == "final" and edit["flight"]["enabled"] and not body.get("original"):
+                rows = lib.flight(item)
+                if rows:
+                    jobs.add_flight_overlay(rgb, rows, edit["flight"], t)
         except Exception as exc:
             raise HTTPException(500, f"Preview failed: {exc}")
         h, w = rgb.shape[:2]
@@ -365,10 +405,12 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if frame_time is not None and item["kind"] == "video":
             kind = "frame"
             run = lambda job: jobs.export_photo(src, item["name"], edit, opts, dest, mask, job,
-                                                frame=(item, float(frame_time)), n=n)
+                                                frame=(item, float(frame_time)), n=n,
+                                                flight=lib.flight(item))
         elif item["kind"] == "video":
             kind = "video"
-            run = lambda job: jobs.export_video(src, item, item["name"], edit, opts, dest, mask, job, n=n)
+            run = lambda job: jobs.export_video(src, item, item["name"], edit, opts, dest, mask, job, n=n,
+                                                flight=lib.flight(item))
         else:
             kind = "photo"
             run = lambda job: jobs.export_photo(src, item["name"], edit, opts, dest, mask, job,
@@ -523,7 +565,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not text:
             raise HTTPException(404, "No GPS location found in this file (or the lookup is offline)")
         edit = lib.get_edit(mid)
-        edit = lib.set_edit(mid, {**edit, "location": {**edit["location"], "text": text}})
+        edit = lib.set_edit(mid, {**edit, "location": {**edit["location"], "text": text}}, "Location found")
         return {"text": text, "edit": edit}
 
     @app.post("/api/media/{mid}/auto")
@@ -697,8 +739,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         for it in lib.list():
             it = lib.ensure_gps(it)
             if it["kind"] == "video":
-                rows = telemetry.load(lib.source_path(it)) if it["source"] == "linked" else []
-                path = telemetry.track(rows)
+                path = telemetry.track(lib.flight(it))
                 if len(path) > 1:
                     tracks[it["id"]] = path
             if not it.get("gps"):
@@ -715,6 +756,24 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/")
     def index():
         return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+    # -- phone upload: installable web app + Android share target ----------------------
+    @app.get("/upload")
+    def upload_page():
+        return FileResponse(STATIC_DIR / "upload.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/sw.js")
+    def service_worker():
+        # Served from the root so it may control the whole app (needed to be installable).
+        return FileResponse(STATIC_DIR / "sw.js", media_type="text/javascript",
+                            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+    @app.post("/share")
+    def share_target(files: list[UploadFile] = File(default=[])):
+        """Android "Share → SirisDrone": add the files, then show the upload page."""
+        r = upload(files) if files else {"added": [], "errors": [], "flight": []}
+        n = len(r["added"]) + len(r["flight"])
+        return RedirectResponse(f"/upload?shared={n}&errors={len(r['errors'])}", status_code=303)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

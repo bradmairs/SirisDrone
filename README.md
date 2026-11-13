@@ -26,6 +26,9 @@ Apple TV 4K screensaver.
 | **Trip map** | *Map* shows every shot with a GPS position on satellite imagery or a street map, coloured by trip, with each clip's flight path from its DJI `.SRT`. Click a dot for its thumbnail and open it in the editor. The map library is bundled; only the map tiles need internet. |
 | **Notifications** | When the watch folder finishes a trip you get a summary: what was exported, what was skipped as blurry or duplicate, the highlight reel, any errors and a few thumbnails. It goes to your phone by [ntfy](https://ntfy.sh), to Discord/Slack or any webhook, and/or by email. Problems such as an unmounted NAS are notified too, at most hourly. |
 | **Status** | One page for NAS free space, watch-folder health, GPU, failed exports and recent problems. The dot on *Status* turns red when something needs attention. |
+| **Flight data overlay** | Altitude, speed, distance and more from the clip's DJI `.SRT`, drawn in a corner like a HUD and burnt into exports. |
+| **Undo & history** | Undo/redo every change, and go back to any saved version of an edit, e.g. the automatic edit. |
+| **Phone upload** | A phone-friendly upload page that installs as an app; on Android it's in the share sheet, on iPhone use the Shortcut in *Using it*. |
 | **Location stamp** | "City, Country" (e.g. *Cowes, Australia*) bottom-left, looked up from the photo/video GPS (EXIF, video metadata or the DJI `.SRT`) via OpenStreetMap when the file is added. Smaller than the BRM Highlife stamp, black or white for contrast; edit the text, size and colour in *Location Stamp*. |
 | **One-click exports** | **Apple TV 4K** (3840 × 2160 HEVC 10-bit, maximum quality, source frame rate up to 60 fps, `hvc1`-tagged for Apple devices) and **Full resolution**. |
 | **NVIDIA GPU** | Video is decoded (NVDEC) and encoded (NVENC H.264 / HEVC 10-bit) on the GPU, including exports, playback previews and hyperlapses. The top bar shows which GPU is in use. If the GPU is missing or busy, the job is redone on the CPU automatically. The colour-grading and stamp filters always run on the CPU, because FFmpeg has no GPU version of them. |
@@ -34,7 +37,7 @@ Apple TV 4K screensaver.
 | **Colour grade** | Every new upload starts with **BRM Blue**, the BRM Highlife house look: deep, clear sky and ocean blues, while greens, sand and rock stay natural. On top of that you get exposure, contrast, highlights, shadows, whites, blacks, **dehaze** (cuts through aerial haze), fade, temperature, tint, vibrance, saturation, split toning, and **Blues** saturation/brightness controls that only affect sky and water. |
 | **Presets** | BRM Blue, Natural, Vivid Aerial, Clear Skies, Golden Hour, Teal & Orange, Moody, Cinematic Fade, Tropical, Black & White, and for Mini 3 Pro **D-Cinelike → BRM Blue** and **D-Cinelike → Natural**. Each one shows a live thumbnail of your shot. Save your own looks, and use *Set as default* to change what new uploads start with. |
 | **LUTs** | Upload `.cube` LUTs (e.g. a D-Cinelike → Rec.709 LUT) with a strength slider. |
-| **Detail** | Sharpen and vignette. |
+| **Detail** | Sharpen, vignette and photo noise reduction (edge-preserving, before the grade). |
 | **Sky (graduated filter)** | Darkens or deepens the top of the frame (neutral, deep blue, teal or warm) to rescue bright, washed-out skies. |
 | **HDR bracket merge** | Select the 3 or 5 shots of an AEB bracket and choose *Merge HDR*. They're aligned (to remove drone drift) and fused into one 16-bit photo with detail in both sky and shadows, which then appears in the library to edit like any photo. |
 | **Hyperlapse** | Select a photo sequence and choose *Hyperlapse…*. Every frame gets one photo's edit, then flicker is removed, the result is stabilised, the stamp is added once, and it's exported as 4K video. |
@@ -128,7 +131,39 @@ The app can only read and write inside these folders.
 Selected*.
 
 **Shortcuts:** `←`/`→` previous/next · `Space` play/pause video · hold `B` before/after · `C` crop ·
-`I`/`O` set video trim in/out · `Esc` leave crop.
+`I`/`O` set video trim in/out · `Esc` leave crop · `Ctrl+Z` undo · `Ctrl+Shift+Z` / `Ctrl+Y` redo.
+
+**Undo and history:** ↶ / ↷ step back and forward through your changes to the open item (a
+slider drag counts as one step). *History* lists every saved version of the item's edit, such
+as when it was added, the automatic edit, colour matching and your own edits, and can go back
+to any of them.
+
+**Upload from your phone:** open `http://<server>:8080/upload` on the phone. It's a simple page
+with one big button that uploads full-quality originals one at a time, with progress.
+- **Android (Chrome):** use *Add to Home screen*. SirisDrone then appears in the share sheet:
+  share photos and videos from Google Photos or the DJI Fly album straight into the library.
+- **iPhone:** use *Add to Home Screen* for an app icon that opens the upload page. iOS doesn't let
+  web apps join the share sheet, so for *Share → SirisDrone* make a Shortcut instead:
+  1. In the Shortcuts app, create a new shortcut and turn on *Show in Share Sheet*. Under
+     *Receive*, choose *Images and Media*.
+  2. Add *Get Contents of URL* with:
+     - URL `http://<server>:8080/api/media/upload`
+     - Method POST
+     - Request Body *Form*
+     - a *File* field named `files` set to *Shortcut Input*
+  3. If you set `SIRIS_USER`/`SIRIS_PASSWORD`, add a header `Authorization` = `Basic <base64 of
+     user:password>`.
+  4. Optionally add *Show Notification* "Sent to SirisDrone".
+
+**Flight data overlay:** for clips with a DJI `.SRT` flight log you can show altitude, speed,
+distance from the start, climb rate, camera settings, GPS position or time of day in a corner,
+like a HUD (Video → *Flight data overlay*). Units are metric or imperial. It's burnt into
+exports and *With edits* playback, updating twice a second. Keep the `.SRT` next to the clip on
+the NAS, or upload it with the clip (same file name).
+
+**Photo noise reduction** (Detail & Effects) smooths grain in high-ISO, dusk and night shots
+while keeping edges. It is applied before the colour grade, so the grade doesn't amplify the
+noise.
 
 **Mini 3 Pro D-Cinelike footage** is 10-bit and flat. Apply the
 **D-Cinelike → BRM Blue** preset (the watch folder does this automatically for

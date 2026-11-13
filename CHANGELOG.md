@@ -3,6 +3,35 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.67 – 2026-11-13
+
+- **Flight data overlay:** Video → *Flight data overlay* draws altitude, speed and distance from
+  the start in a corner of the clip, read from its DJI `.SRT`. Climb rate, camera settings
+  (ISO, shutter, f-stop), GPS position and time of day can be added too. Units are metric or
+  imperial, and corner, size and opacity are adjustable. It shows in the preview and *With
+  edits* playback, and is burnt into exports, updating twice a second. The box keeps its size
+  as the numbers change, so it doesn't jiggle. Highlight reels leave it off. Uploading a clip's
+  `.SRT` with it (same name) attaches the flight log, which also gives uploaded clips a place on
+  the trip map.
+- **Photo noise reduction:** a *Noise reduction* slider in Detail & Effects for photos. It is
+  edge-preserving (a guided filter on brightness plus a chroma blur) and runs before the grade,
+  so BRM Blue doesn't amplify grain. Large 48 MP photos are processed in strips to keep memory
+  low. The preview shows the effect at its own scale.
+- **Undo, redo and history:**
+  - ↶ / ↷ buttons and Ctrl+Z / Ctrl+Shift+Z step through changes to the open item (a slider
+    drag is one step).
+  - *History* lists every saved version of an item's edit (added, automatic edit, matched
+    colours, location found, your edits; quick saves within 20 s merge) and can go back to
+    any of them, undoably. Up to 40 versions are kept per item, always including the first.
+- **Upload from your phone:**
+  - `/upload` is a phone-friendly page that uploads full-quality originals one by one with
+    progress.
+  - The app is installable (web app manifest, icons, service worker). On Android it then
+    appears in the share sheet (*Share → SirisDrone*), so photos and clips go straight from
+    Google Photos or DJI Fly into the library.
+  - On iPhone, *Add to Home Screen* gives an icon for the upload page, and the README explains
+    a Shortcut for the share sheet.
+
 ## 1.57 – 2026-11-13
 
 - **Trip map:** *Map* in the top bar shows every shot with a GPS position on satellite imagery

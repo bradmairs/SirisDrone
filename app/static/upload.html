@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Upload · SirisDrone</title>
+<meta name="theme-color" content="#0e1116">
+<link rel="manifest" href="/static/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SirisDrone">
+<style>
+  :root { --bg: #0e1116; --bg-2: #151a21; --bg-3: #1c232c; --line: #2a333f; --text: #e6ebf1; --muted: #8e9aab;
+          --accent: #38bdf8; --accent-ink: #04202e; --danger: #f87171; --ok: #4ade80; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 8px 0 4px; display: flex; align-items: center; gap: 10px; }
+  h1 svg { color: var(--accent); }
+  p { color: var(--muted); margin: 6px 0 16px; }
+  .pick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; width: 100%;
+          min-height: 150px; border: 2px dashed var(--line); border-radius: 14px; background: var(--bg-2); color: var(--text);
+          font-size: 18px; font-weight: 600; cursor: pointer; }
+  .pick small { color: var(--muted); font-weight: 400; font-size: 14px; }
+  .pick:active { border-color: var(--accent); }
+  ul { list-style: none; padding: 0; margin: 18px 0; }
+  li { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  li .top { display: flex; justify-content: space-between; gap: 8px; }
+  li .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li .st { color: var(--muted); flex: none; }
+  li.done .st { color: var(--ok); } li.error .st { color: var(--danger); }
+  li .err { color: var(--danger); font-size: 14px; margin-top: 4px; }
+  .bar { height: 5px; background: var(--bg-3); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .actions { display: flex; gap: 10px; }
+  .btn { flex: 1; text-align: center; padding: 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-3);
+         color: var(--text); text-decoration: none; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .note { background: #38bdf81a; border: 1px solid #38bdf855; border-radius: 10px; padding: 10px 12px; color: var(--text); margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="8" cy="8" r="5"/><circle cx="24" cy="8" r="5"/><circle cx="8" cy="24" r="5"/><circle cx="24" cy="24" r="5"/></g><rect x="12" y="12" width="8" height="8" rx="2" fill="currentColor"/></svg>Upload to SirisDrone</h1>
+  <p>Photos and videos from your phone go into the library with the BRM Blue look and stamp, ready to tweak and export.</p>
+  <div class="note" id="shared" hidden></div>
+  <label class="pick">
+    <input type="file" id="files" multiple accept="image/*,video/*,.dng,.DNG,.srt,.SRT" hidden>
+    Choose photos &amp; videos
+    <small>Full-quality originals · DJI .SRT flight logs too</small>
+  </label>
+  <ul id="list"></ul>
+  <div class="actions"><a class="btn primary" href="/">Open the editor</a></div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+const q = new URLSearchParams(location.search);
+if (q.has("shared")) {
+  const n = +q.get("shared"), bad = +(q.get("errors") || 0);
+  $("#shared").hidden = false;
+  $("#shared").textContent = `${n} file${n === 1 ? "" : "s"} added to the library` + (bad ? ` · ${bad} couldn't be added` : "") + ".";
+}
+
+function send(file, row) {
+  // One file per request: big 4K clips get their own progress bar and can't hold up the rest.
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    const fd = new FormData();
+    fd.append("files", file, file.name);
+    xhr.open("POST", "/api/media/upload");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) row.querySelector("i").style.width = `${(100 * e.loaded / e.total).toFixed(0)}%`; };
+    xhr.onload = () => {
+      let r = {};
+      try { r = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+      const err = xhr.status !== 200 ? (r.detail || `HTTP ${xhr.status}`) : (r.errors || [])[0];
+      row.className = err ? "error" : "done";
+      row.querySelector(".st").textContent = err ? "failed" : (r.flight?.length ? "flight log added" : "added");
+      if (err) row.insertAdjacentHTML("beforeend", `<div class="err">${esc(err)}</div>`);
+      row.querySelector("i").style.width = "100%";
+      resolve();
+    };
+    xhr.onerror = () => { row.className = "error"; row.querySelector(".st").textContent = "network error"; resolve(); };
+    xhr.send(fd);
+  });
+}
+
+$("#files").onchange = async (e) => {
+  const files = [...e.target.files];
+  // Clips before their .SRT flight logs, so each log finds its clip.
+  files.sort((a, b) => a.name.toLowerCase().endsWith(".srt") - b.name.toLowerCase().endsWith(".srt"));
+  const rows = files.map((f) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<div class="top"><span class="name">${esc(f.name)}</span><span class="st">${(f.size / 1e6).toFixed(1)} MB · waiting</span></div><div class="bar"><i></i></div>`;
+    $("#list").prepend(li);
+    return li;
+  });
+  for (let i = 0; i < files.length; i++) {
+    rows[i].querySelector(".st").textContent = "uploading…";
+    await send(files[i], rows[i]);
+  }
+  e.target.value = "";
+};
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+</script>
+</body>
+</html>

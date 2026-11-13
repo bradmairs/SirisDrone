@@ -249,6 +249,7 @@ def render_segment(path: Path, meta: dict, edit: dict, start: float, end: float,
     e["video"] = {**e["video"], "trim_start": start, "trim_end": end, "mute": True}
     e["stamp"] = {**e["stamp"], "enabled": False}
     e["location"] = {**e["location"], "enabled": False}
+    e["flight"] = {**e["flight"], "enabled": False}
     w, h = size
 
     def make(gpu_on: bool) -> list[str]:

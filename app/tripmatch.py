@@ -131,6 +131,6 @@ def match_library(lib, items: list[dict], reference: list[dict] | None = None) -
             delta = {k: round(new["grade"][k] - edit["grade"][k], 2)
                      for k in ("exposure", "temperature", "tint")}
             if any(delta.values()):
-                lib.set_edit(it["id"], new)
+                lib.set_edit(it["id"], new, "Matched colours")
                 changed[it["id"]] = delta
     return changed
