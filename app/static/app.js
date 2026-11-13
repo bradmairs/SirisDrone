@@ -174,7 +174,58 @@ const saveEdit = debounce(async () => {
   try { await api("PUT", `/api/media/${id}/edit`, edit); } catch (e) { toast("Could not save: " + e.message, "error"); }
 }, 400);
 
+// Undo / redo: snapshots of the edit, one per change (a slider drag counts as one).
+const undo = { past: [], future: [], snap: null, at: 0 };
+function resetUndo() {
+  undo.past = []; undo.future = []; undo.snap = state.edit ? JSON.stringify(state.edit) : null; undo.at = 0;
+  updateUndoButtons();
+}
+function recordUndo() {
+  const now = JSON.stringify(state.edit);
+  if (undo.snap === null || now === undo.snap) { undo.snap = now; return; }
+  if (Date.now() - undo.at > 700) {          // a new step (not the same drag)
+    undo.past.push(undo.snap);
+    if (undo.past.length > 100) undo.past.shift();
+  }
+  undo.at = Date.now();
+  undo.future = [];
+  undo.snap = now;
+  updateUndoButtons();
+}
+function updateUndoButtons() {
+  $("#undoBtn").disabled = !undo.past.length;
+  $("#redoBtn").disabled = !undo.future.length;
+}
+function applyEdit(edit) {
+  state.edit = edit;
+  undo.snap = JSON.stringify(edit);
+  syncControls(); playerEditChanged(); requestPreview(); saveEdit(); updateInfo(); updateTimeline();
+  updateUndoButtons();
+}
+function undoEdit() {
+  if (!undo.past.length || !state.edit) return;
+  undo.future.push(JSON.stringify(state.edit));
+  applyEdit(JSON.parse(undo.past.pop()));
+}
+function redoEdit() {
+  if (!undo.future.length || !state.edit) return;
+  undo.past.push(JSON.stringify(state.edit));
+  applyEdit(JSON.parse(undo.future.pop()));
+}
+
+async function openHistory() {
+  if (!state.current) return;
+  await saveEdit.flush();
+  const list = await api("GET", `/api/media/${state.current.id}/history`);
+  const when = (t) => new Date(t * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  $("#histList").innerHTML = list.length
+    ? list.map((h, i) => `<li><div class="top"><span class="name">${escapeHtml(h.label)}${i === 0 ? ' <span class="hint">(current)</span>' : ""}</span><span class="st">${when(h.at)}</span></div>${i ? `<button class="link" data-restore="${h.index}">Go back to this</button>` : ""}</li>`).join("")
+    : `<li class="empty">No earlier versions yet – they're kept from now on.</li>`;
+  $("#histDlg").showModal();
+}
+
 function editChanged() {
+  recordUndo();
   syncControls();
   playerEditChanged();
   requestPreview();
@@ -365,6 +416,10 @@ function buildPanel() {
   // Effects
   const fx = section("effects", "Detail &amp; Effects");
   fx.append(slider("sharpen", "Sharpen", 0, 100));
+  const nr = slider("noise", "Noise reduction", 0, 100);
+  nr.title = "Smooths grain in high-ISO and dusk shots while keeping edges (photos; videos have their own in Video)";
+  controls.push({ sync() { nr.hidden = state.current?.kind === "video"; } });
+  fx.append(nr);
   fx.append(slider("vignette", "Vignette", -100, 100, 1, { track: "linear-gradient(90deg,#000,#3a4553,#fff)" }));
 
   const sky = section("sky", "Sky (graduated filter)");
@@ -507,6 +562,7 @@ function buildVideoSection() {
   vs.append(slider("video.denoise", "Noise reduction", 0, 100));
   vs.append(el(`<p class="hint">Stabilise and noise reduction show in “With edits” playback and the export, not in the still preview.</p>`));
   vs.append(el(`<p class="hint">Tip: slow-mo works best on 60/120 fps footage – export at 25 or 30 fps for smooth motion.</p>`));
+  buildFlightSection(vs);
   controls.push({
     sync() {
       const isVid = state.current?.kind === "video";
@@ -519,6 +575,59 @@ function buildVideoSection() {
       const hlg = it.color_transfer === "arib-std-b67";
       $("#videoInfo").innerHTML = `${it.width}×${it.height} · ${it.fps} fps · ${(it.codec || "").toUpperCase()} ${it.bit_depth}-bit · ${fmtTime(it.duration)}${it.has_audio ? "" : " · no audio"}`
         + (hlg ? `<br><span class="hint warn">HLG footage – add a HLG→Rec.709 LUT for normal-looking colour.</span>` : "");
+    },
+  });
+}
+
+const FLIGHT_FIELDS = [["alt", "Altitude"], ["speed", "Speed"], ["dist", "Distance from start"],
+  ["vspeed", "Climb rate"], ["camera", "Camera (ISO, shutter, f-stop)"], ["coords", "GPS position"], ["time", "Time of day"]];
+const flightCache = {};
+
+async function loadFlight(item) {
+  if (item?.kind !== "video") return;
+  if (!(item.id in flightCache)) {
+    try { flightCache[item.id] = await api("GET", `/api/media/${item.id}/flight`); } catch (_) { flightCache[item.id] = { available: false }; }
+  }
+  syncControls();
+}
+
+function buildFlightSection(parent) {
+  const box = el(`<div class="flight-box">
+    <label class="chk"><input type="checkbox" id="flChk"> Flight data overlay</label>
+    <div class="hint" id="flInfo"></div>
+    <div id="flOpts">
+      <div class="fl-items">${FLIGHT_FIELDS.map(([k, l]) => `<label class="chk"><input type="checkbox" data-fl="${k}"> ${l}</label>`).join("")}</div>
+      <div class="row"><div class="field"><label>Units</label><select id="flUnits"><option value="metric">m · km/h</option><option value="imperial">ft · mph</option></select></div>
+      <div class="field"><label>Corner</label><select id="flPos"><option value="tl">Top left</option><option value="tr">Top right</option><option value="bl">Bottom left</option><option value="br">Bottom right</option></select></div></div>
+    </div></div>`);
+  $("#flChk", box).onchange = (e) => { state.edit.flight.enabled = e.target.checked; editChanged(); };
+  box.querySelectorAll("[data-fl]").forEach((c) => {
+    c.onchange = () => {
+      const on = [...box.querySelectorAll("[data-fl]:checked")].map((x) => x.dataset.fl);
+      state.edit.flight.items = on.length ? on : ["alt"];
+      editChanged();
+    };
+  });
+  $("#flUnits", box).onchange = (e) => { state.edit.flight.units = e.target.value; editChanged(); };
+  $("#flPos", box).onchange = (e) => { state.edit.flight.position = e.target.value; editChanged(); };
+  $("#flOpts", box).append(slider("flight.size", "Text size", 1, 6, 0.1));
+  $("#flOpts", box).append(slider("flight.opacity", "Opacity", 10, 100));
+  parent.append(box);
+  controls.push({
+    sync() {
+      const it = state.current;
+      if (it?.kind !== "video") return;
+      const f = state.edit.flight, info = flightCache[it.id];
+      const ok = !!info?.available;
+      $("#flChk").checked = f.enabled && ok;
+      $("#flChk").disabled = !ok;
+      $("#flOpts").hidden = !(f.enabled && ok);
+      box.querySelectorAll("[data-fl]").forEach((c) => { c.checked = f.items.includes(c.dataset.fl); });
+      $("#flUnits").value = f.units; $("#flPos").value = f.position;
+      const s = info?.summary;
+      $("#flInfo").textContent = !info ? "Checking for a flight log…"
+        : ok ? `From the DJI flight log: up to ${Math.round(s.max_alt ?? 0)} m high, ${Math.round((s.max_speed ?? 0) * 3.6)} km/h, ${Math.round(s.max_dist ?? 0)} m from the start.`
+        : "No flight log for this clip. Keep the DJI .SRT next to the clip on the NAS, or upload it (same name as the clip).";
     },
   });
 }
@@ -1040,7 +1149,7 @@ function initLibrary() {
 function mergeParts(target, src, parts) {
   const out = clone(target);
   if (parts.includes("grade")) out.grade = clone(src.grade);
-  if (parts.includes("effects")) { out.sharpen = src.sharpen; out.vignette = src.vignette; }
+  if (parts.includes("effects")) { out.sharpen = src.sharpen; out.vignette = src.vignette; out.noise = src.noise; }
   if (parts.includes("stamp")) out.stamp = clone(src.stamp);
   if (parts.includes("geometry")) {
     for (const k of ["rotate", "flip_h", "flip_v", "straighten", "aspect", "crop"]) out[k] = clone(src[k]);
@@ -1068,11 +1177,13 @@ async function selectItem(id) {
   stopPlayback(true);
   if (state.cropMode) { state.cropMode = false; $("#cropToggle").classList.remove("on"); $("#cropLayer").hidden = true; }
   renderLibrary();
+  resetUndo();
   syncControls();
   updateTimeline();
   updateInfo();
   requestPreview();
   loadPresetThumbs();
+  loadFlight(item);
 }
 
 function updateInfo() {
@@ -1477,6 +1588,20 @@ function initViewer() {
   $("#cropToggle").onclick = () => setCropMode(!state.cropMode);
   $("#prevBtn").onclick = () => navigate(-1);
   $("#nextBtn").onclick = () => navigate(1);
+  $("#undoBtn").onclick = undoEdit;
+  $("#redoBtn").onclick = redoEdit;
+  $("#historyBtn").onclick = () => openHistory().catch((e) => toast(e.message, "error"));
+  $("#histList").onclick = async (e) => {
+    const b = e.target.closest("[data-restore]");
+    if (!b || !state.current) return;
+    try {
+      const edit = await api("POST", `/api/media/${state.current.id}/history/${b.dataset.restore}/restore`);
+      undo.past.push(JSON.stringify(state.edit)); undo.future = [];
+      applyEdit(edit);
+      $("#histDlg").close();
+      toast("Went back to that version – Undo brings your last edit back");
+    } catch (err) { toast(err.message, "error"); }
+  };
   $("#copyBtn").onclick = () => { state.clipboard = clone(state.edit); $("#pasteBtn").disabled = false; toast("Settings copied – open another item and press Paste"); };
   $("#pasteBtn").onclick = () => {
     if (!state.clipboard) return;
@@ -1495,7 +1620,10 @@ function initViewer() {
   };
 
   document.addEventListener("keydown", (e) => {
-    if (e.target.matches("input, select, textarea") || $("dialog[open]")) return;
+    if (e.target.matches("input:not([type=range]):not([type=checkbox]), select, textarea") || $("dialog[open]")) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redoEdit() : undoEdit(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redoEdit(); return; }
+    if (e.target.matches("input, select, textarea")) return;
     if (e.key === "b" || e.key === "\\") { setBefore(true); e.preventDefault(); }
     else if (e.key === "c") setCropMode(!state.cropMode);
     else if (e.key === "Escape") { setCropMode(false); stopPlayback(); }
@@ -1862,3 +1990,5 @@ function initBatchTools() {
 }
 
 init().catch((e) => toast("Failed to start: " + e.message, "error"));
+// Installable as an app ("Add to Home Screen"), and on Android a share target for photos/videos.
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});

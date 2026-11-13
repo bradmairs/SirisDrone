@@ -314,3 +314,11 @@ code { background: var(--bg); padding: 0 4px; border-radius: 3px; font-size: 11p
 .notify-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 12px 10px; margin: 12px 0; }
 .notify-box legend { padding: 0 4px; }
 .notify-box input:not([type=checkbox]) { width: 100%; }
+
+/* Flight data, history */
+.flight-box { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.flight-box .fl-items { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin: 6px 0; }
+.flight-box .row { display: flex; gap: 8px; }
+.flight-box .row .field { flex: 1; }
+.hist-list { max-height: 55vh; overflow: auto; }
+.hist-list li .link { margin-top: 4px; padding: 0; }

@@ -12,6 +12,7 @@ import copy
 import math
 from dataclasses import dataclass
 
+from . import flightdata
 from .grading import HOUSE_GRADE, normalize_grade
 
 STAMP_POSITIONS = ("br", "bl", "tr", "tl", "bc", "tc")
@@ -25,6 +26,7 @@ DEFAULT_EDIT: dict = {
     "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
     "grade": normalize_grade(HOUSE_GRADE),  # "BRM Blue"
     "sharpen": 0,     # 0..100
+    "noise": 0,       # 0..100 photo noise reduction (videos use video.denoise)
     "vignette": 0,    # -100..100 (negative darkens edges)
     # Graduated "sky" filter: darkens/tints the top of the frame, fading out by `height` %.
     "grad": {"strength": 0, "height": 50, "color": "#000000"},
@@ -50,6 +52,8 @@ DEFAULT_EDIT: dict = {
         "color": "auto",
         "shadow": 30,     # soft halo in the opposite colour so thin text reads over busy surf
     },
+    # Altitude / speed / distance from the clip's DJI .SRT, drawn on the video (see flightdata.py)
+    "flight": flightdata.normalize({}),
     "video": {
         "trim_start": 0.0,
         "trim_end": None,  # None = end of clip
@@ -87,6 +91,7 @@ def normalize_edit(edit: dict | None) -> dict:
     e["crop"] = {"x": min(x, 1 - w), "y": min(y, 1 - h), "w": w, "h": h}
     e["grade"] = normalize_grade(edit["grade"]) if "grade" in edit else e["grade"]
     e["sharpen"] = _num(edit.get("sharpen", 0), 0, 100, 0)
+    e["noise"] = _num(edit.get("noise", 0), 0, 100, 0)
     e["vignette"] = _num(edit.get("vignette", 0), -100, 100, 0)
     gr = {**DEFAULT_EDIT["grad"], **(edit.get("grad") or {})}
     gcol = str(gr.get("color") or "#000000")
@@ -121,6 +126,8 @@ def normalize_edit(edit: dict | None) -> dict:
         "color": lcol if lcol == "auto" or (len(lcol) == 7 and lcol.startswith("#")) else "auto",
         "shadow": _num(lo.get("shadow"), 0, 100, 30),
     }
+
+    e["flight"] = flightdata.normalize(edit.get("flight"))
 
     v = {**DEFAULT_EDIT["video"], **(edit.get("video") or {})}
     start = _num(v.get("trim_start"), 0, 1e7, 0.0)

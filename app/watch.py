@@ -364,9 +364,9 @@ class Watcher:
         if kind == "video" and w["reel"] and self.submit_reel is not None:
             out.update({"wait_reel": self.lib.trip_key(item), "reel_folder": self.out_folder(path, w, item)})
         if action == "skip":
-            self.lib.set_edit(item["id"], edit)
+            self.lib.set_edit(item["id"], edit, "Automatic edit")
             return {**out, "action": "edited only"}
-        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(action, item, edit))
+        edit = self.lib.set_edit(item["id"], recipes.recipe_edit(action, item, edit), "Automatic edit")
         if (kind == "photo" and w["cull"]) or w["match"]:
             out["action"] = "batch"   # exported by _finish_batch at the end of the scan
             if w["delete_originals"]:

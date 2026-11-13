@@ -6,6 +6,11 @@
 <title>SirisDrone Studio</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='8' cy='8' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><circle cx='24' cy='8' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><circle cx='8' cy='24' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><circle cx='24' cy='24' r='5' fill='none' stroke='%2338bdf8' stroke-width='2.5'/><rect x='12' y='12' width='8' height='8' rx='2' fill='%2338bdf8'/></svg>">
 <link rel="stylesheet" href="/static/style.css">
+<link rel="manifest" href="/static/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta name="theme-color" content="#0e1116">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SirisDrone">
 </head>
 <body>
 <header class="topbar">
@@ -16,7 +21,7 @@
   </div>
   <div class="topbar-actions">
     <label class="btn" title="Upload photos and videos">
-      <input type="file" id="fileInput" multiple accept="image/*,video/*,.dng,.DNG,.mov,.MOV,.mp4,.MP4" hidden>
+      <input type="file" id="fileInput" multiple accept="image/*,video/*,.dng,.DNG,.mov,.MOV,.mp4,.MP4,.srt,.SRT" hidden>
       Upload
     </label>
     <button class="btn" id="importBtn" title="Add files already on the NAS (no upload needed)">Import from NAS</button>
@@ -114,6 +119,9 @@
     <canvas id="histogram" width="300" height="80" title="Histogram"></canvas>
     <div class="sections" id="sections"></div>
     <div class="panel-foot">
+      <button class="btn sm" id="undoBtn" title="Undo (Ctrl+Z)" disabled>↶</button>
+      <button class="btn sm" id="redoBtn" title="Redo (Ctrl+Shift+Z)" disabled>↷</button>
+      <button class="btn sm" id="historyBtn" title="Earlier versions of this edit, e.g. the automatic edit">History</button>
       <button class="btn sm" id="copyBtn" title="Copy this item's settings">Copy</button>
       <button class="btn sm" id="pasteBtn" title="Paste settings onto this item" disabled>Paste</button>
       <button class="btn sm" id="resetBtn">Reset</button>
@@ -256,6 +264,16 @@
       <button value="cancel" class="btn ghost">Close</button>
       <button type="button" class="btn primary" id="wSave">Save</button>
     </div>
+  </form>
+</dialog>
+
+<!-- Edit history -->
+<dialog id="histDlg" class="dlg small">
+  <form method="dialog">
+    <h2>Edit history</h2>
+    <p class="hint">Every saved version of this item's edit, newest first. Going back is itself undoable.</p>
+    <ul class="jobs hist-list" id="histList"></ul>
+    <div class="dlg-actions"><button value="cancel" class="btn">Close</button></div>
   </form>
 </dialog>
 

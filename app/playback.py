@@ -18,7 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import video
+from . import telemetry, video
 from .edits import normalize_edit
 
 PLAYBACK_EDGE = 1280
@@ -94,7 +94,8 @@ class Playback:
                     _, pix, _ = video.encoder_settings("h264", "standard", use_gpu, fast=True)
                     stab = video.prepare_stabilize(src, item, edit, Path(work), use_gpu, state["cancel"])
                     g = video.build_graph(item, edit, Path(work), mask, long_edge=PLAYBACK_EDGE,
-                                          out_pix_fmt=pix, stab=stab)
+                                          out_pix_fmt=pix, stab=stab,
+                                          flight=telemetry.load_for(src, out.parent.parent))
                     cmd = video.export_command(src, item, g, tmp, "h264", "standard",
                                                keep_metadata=False, fast=True, use_gpu=use_gpu)
                     video.run_ffmpeg(cmd, g["duration"], lambda p: state.__setitem__("progress", p),

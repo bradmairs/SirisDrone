@@ -17,7 +17,7 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import gpu, grading, render
+from . import flightdata, gpu, grading, render
 from .edits import normalize_edit, plan_geometry
 from .render import SHARPEN_MAX, SHARPEN_SIZE, grad_overlay, vignette_overlay
 from .stamp import AUTO, location_mask, location_settings, render_stamp, resolve_color
@@ -191,10 +191,11 @@ def resolve_stamp(path: Path, meta: dict, edit: dict, stamp_mask: Image.Image | 
 def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image | None,
                 long_edge: int | tuple | None = None, fps: float | None = None,
                 out_pix_fmt: str = "yuv420p", allow_upscale: bool = False,
-                stab: Path | None = None) -> dict:
+                stab: Path | None = None, flight: list | None = None) -> dict:
     """Return the FFmpeg input args / filter graph for an edit (without encoder settings).
 
-    `stab` is the shake analysis from prepare_stabilize(), when stabilising."""
+    `stab` is the shake analysis from prepare_stabilize(), when stabilising; `flight` the clip's
+    telemetry rows, for the flight data overlay."""
     edit = normalize_edit(edit)
     geo = plan_geometry(meta["width"], meta["height"], edit)
     out_w, out_h = geo.output_size(long_edge, even=True, allow_upscale=allow_upscale)
@@ -282,9 +283,17 @@ def build_graph(meta: dict, edit: dict, workdir: Path, stamp_mask: Image.Image |
     if loc_mask is not None:
         img, x, y = render_stamp(loc_mask, out_w, out_h, location_settings(loc, loc_mask))
         overlay(img, "location", x, y)
+    start, src_dur = _trim(meta, v)
+    if edit["flight"]["enabled"] and flight:
+        fd = flightdata.frames(flight, edit["flight"], out_w, out_h, start, src_dur / speed, speed, workdir)
+        if fd:
+            lst, x, y = fd
+            inputs.extend(["-f", "concat", "-safe", "0", "-i", str(lst)])
+            graph.append(f"[{n_in}:v]scale=out_color_matrix=bt709:out_range=tv,format=yuva444p10le[fd]")
+            graph.append(f"[{last}][fd]overlay={x}:{y}:format=yuv444p10:eof_action=repeat[fdo]")
+            last, n_in = "fdo", n_in + 1
     graph.append(f"[{last}]format={out_pix_fmt}[vout]")
 
-    start, src_dur = _trim(meta, v)
     return {
         "inputs": inputs, "filter": ";".join(graph), "width": out_w, "height": out_h,
         "start": start, "src_duration": src_dur, "duration": src_dur / speed,

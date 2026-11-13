@@ -360,6 +360,55 @@ def _box_blur(a: np.ndarray, size: int) -> np.ndarray:
     return a
 
 
+NOISE_STRIP = 768  # rows per strip: keeps 48 MP photos to a few hundred MB of working memory
+
+
+def _denoise_strip(rgb: np.ndarray, a: float, r: int, rc: int) -> np.ndarray:
+    """Edge-preserving luminance smoothing (self-guided filter) plus chroma blur."""
+    luma = grading.LUMA
+    y = rgb @ luma
+    cr, cb = rgb[..., 0] - y, rgb[..., 2] - y
+    size = 2 * r + 1
+    mean = _box_blur(y, size)
+    var = np.maximum(_box_blur(y * y, size) - mean * mean, 0)
+    eps = (0.004 + 0.05 * a) ** 2          # flat areas (variance below this) are smoothed
+    k = var / (var + eps)
+    q = _box_blur(k, size) * y + _box_blur(mean - k * mean, size)
+    y2 = y + (q - y) * min(1.0, 0.4 + a)
+    csize = 2 * rc + 1
+    for _ in range(2):                    # two box passes ≈ a Gaussian
+        cr, cb = _box_blur(cr, csize), _box_blur(cb, csize)
+    r2, b2 = y2 + cr, y2 + cb
+    g2 = (y2 - luma[0] * r2 - luma[2] * b2) / luma[1]
+    return np.stack([r2, g2, b2], axis=-1)
+
+
+def apply_denoise(rgb: np.ndarray, amount: float, scale: float = 1.0) -> np.ndarray:
+    """Photo noise reduction, 0..100, before the grade (which would amplify the noise).
+
+    `scale` is output pixels per source pixel: noise is per source pixel, so a downscaled
+    preview needs (and shows) proportionally less. Works in strips of rows."""
+    if not amount:
+        return rgb
+    a = amount / 100 * min(1.0, scale * 2)
+    if a < 0.02:
+        return rgb
+    r = max(1, round((1 + 3 * a) * min(scale, 1.0) + 0.25))
+    rc = max(1, round((2 + 6 * a) * min(scale, 1.0)))
+    pad = 3 * max(r, 2 * rc) + 2
+    h = rgb.shape[0]
+    carry = None  # the original rows just above this strip (already overwritten in rgb)
+    for top in range(0, h, NOISE_STRIP):
+        end, hi = min(h, top + NOISE_STRIP), min(h, top + NOISE_STRIP + pad)
+        block = rgb[top:hi] if carry is None else np.concatenate([carry, rgb[top:hi]])
+        above = 0 if carry is None else len(carry)
+        out = _denoise_strip(block, a, r, rc)
+        carry = rgb[max(top, end - pad):end].copy()
+        rgb[top:end] = out[above: above + end - top]
+    np.clip(rgb, 0, 1, out=rgb)
+    return rgb
+
+
 def apply_sharpen(rgb: np.ndarray, amount: float) -> np.ndarray:
     """Luma unsharp mask (matches FFmpeg unsharp=5:5:amount on the Y plane)."""
     if not amount:
@@ -389,6 +438,8 @@ def render(src, edit: dict, *, long_edge: int | None = None, mode: str = "final"
     img = apply_geometry(src, geo, out_w, out_h, fast=fast)
     rgb = to_float(img)
     del img
+    if edit["noise"]:
+        rgb = apply_denoise(rgb, edit["noise"], out_w / max(geo.cw, 1))
     rgb = grading.grade_image(rgb, edit["grade"], n=33 if fast else 65, in_place=True)
     if mode == "final":
         apply_grad(rgb, edit["grad"])

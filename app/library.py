@@ -12,7 +12,7 @@ from typing import BinaryIO
 
 from PIL import Image
 
-from . import culling, geo, render, video
+from . import culling, geo, render, telemetry, video
 from .edits import normalize_edit
 
 PROXY_EDGE = 2048
@@ -120,11 +120,12 @@ class Library:
             shutil.rmtree(self._item_dir(mid), ignore_errors=True)
             raise ValueError(f"{name}: unsupported or damaged file ({exc})") from exc
         self._write_meta(item)
-        edit = self.set_edit(mid, default_edit or {})
+        edit = normalize_edit(default_edit or {})
         if not edit["location"]["text"]:
             text = self.detect_location(item)
             if text:
-                self.set_edit(mid, {**edit, "location": {**edit["location"], "text": text}})
+                edit = {**edit, "location": {**edit["location"], "text": text}}
+        self.set_edit(mid, edit, "Added")
         try:
             self.make_thumb(item)
         except Exception:
@@ -145,6 +146,24 @@ class Library:
             self._write_meta(item)
         return item
 
+    def flight(self, item: dict) -> list[dict]:
+        """The clip's DJI telemetry (.SRT beside it, or one uploaded for it), [] if none."""
+        if item["kind"] != "video":
+            return []
+        return telemetry.load_for(self.source_path(item), self._item_dir(item["id"]))
+
+    def attach_srt(self, filename: str, stream) -> dict:
+        """Keep an uploaded DJI .SRT with the library clip of the same name (newest first)."""
+        stem = Path(filename).stem.lower()
+        clips = [i for i in self.list() if i["kind"] == "video" and Path(i["name"]).stem.lower() == stem]
+        if not clips:
+            raise ValueError(f"{Path(filename).name}: add the video {Path(filename).stem}.MP4 first, then its .SRT")
+        item = max(clips, key=lambda i: i.get("added", 0))
+        dest = self._item_dir(item["id"]) / "flight.SRT"
+        with open(dest, "wb") as fh:
+            shutil.copyfileobj(stream, fh)
+        return self.update_meta(item["id"], gps=None)  # look the position up again
+
     def ensure_gps(self, item: dict) -> dict:
         """Where the shot was taken, (lat, lon) as item["gps"] ([] when unknown), stored once."""
         if "gps" in item:
@@ -157,6 +176,9 @@ class Library:
                     gps = geo.gps_from_exif(im.getexif().tobytes())
             else:
                 gps = geo.gps_for_video(src, item)
+                if not gps:  # an .SRT uploaded for the clip
+                    fix = next((r for r in self.flight(item) if "lat" in r), None)
+                    gps = (fix["lat"], fix["lon"]) if fix else None
         except Exception:
             gps = None
         try:
@@ -246,13 +268,56 @@ class Library:
         p = self._item_dir(mid) / "edit.json"
         return normalize_edit(json.loads(p.read_text()) if p.exists() else {})
 
-    def set_edit(self, mid: str, edit: dict) -> dict:
+    HISTORY_MAX = 40       # versions kept per item (the first one is always kept)
+    HISTORY_MERGE = 20.0   # seconds: quick successive saves (a slider drag) are one version
+
+    def set_edit(self, mid: str, edit: dict, label: str = "Edited") -> dict:
+        """Save an item's edit and record it in its history (see history())."""
         edit = normalize_edit(edit)
         d = self._item_dir(mid)
-        tmp = d / "edit.json.tmp"
-        tmp.write_text(json.dumps(edit))
-        tmp.replace(d / "edit.json")
+        with self._lock:
+            path = d / "edit.json"
+            prev = None
+            if path.exists():
+                try:
+                    prev = normalize_edit(json.loads(path.read_text()))
+                except ValueError:
+                    prev = None
+            if prev == edit:
+                return edit
+            tmp = d / "edit.json.tmp"
+            tmp.write_text(json.dumps(edit))
+            tmp.replace(path)
+            self._push_history(d, edit, label, prev)
         return edit
+
+    def _push_history(self, d: Path, edit: dict, label: str, prev: dict | None) -> None:
+        hp = d / "history.json"
+        try:
+            hist = json.loads(hp.read_text())
+        except (OSError, ValueError):
+            hist = []
+        now = time.time()
+        if not hist and prev is not None:  # items from before 1.6 start with what they had
+            hist.append({"at": now, "label": "Earlier edit", "edit": prev})
+        last = hist[-1] if hist else None
+        if (last and label == "Edited" and last["label"] == "Edited" and len(hist) > 1
+                and now - last["at"] < self.HISTORY_MERGE):
+            hist[-1] = {"at": now, "label": label, "edit": edit}
+        else:
+            hist.append({"at": now, "label": label, "edit": edit})
+        if len(hist) > self.HISTORY_MAX:
+            hist = hist[:1] + hist[-(self.HISTORY_MAX - 1):]
+        tmp = d / "history.json.tmp"
+        tmp.write_text(json.dumps(hist))
+        tmp.replace(hp)
+
+    def history(self, mid: str) -> list[dict]:
+        """Earlier versions of an item's edit, oldest first: {"at", "label", "edit"}."""
+        try:
+            return json.loads((self._item_dir(mid) / "history.json").read_text())
+        except (OSError, ValueError):
+            return []
 
     # -- pixels -------------------------------------------------------------
     def thumb_path(self, mid: str) -> Path:

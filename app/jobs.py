@@ -17,7 +17,7 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from . import geo, hdr, render, video
+from . import flightdata, geo, hdr, render, telemetry, video
 from .edits import normalize_edit
 
 DEFAULT_EXPORT = {
@@ -228,7 +228,8 @@ def _with_location(edit: dict, gps) -> dict:
 
 
 def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
-                 stamp_mask, job: Job, frame: tuple | None = None, n: int = 1) -> str:
+                 stamp_mask, job: Job, frame: tuple | None = None, n: int = 1,
+                 flight: list | None = None) -> str:
     """Render a photo (or a video frame when `frame=(meta, t)`) at full quality."""
     edit = normalize_edit(edit)
     job.progress = 0.05
@@ -255,8 +256,18 @@ def export_photo(src_path: Path, name: str, edit: dict, opts: dict, dest: Path,
     rgb = render.render(src, edit, long_edge=size_spec(opts["photo_size"]), stamp_mask=stamp_mask,
                         allow_upscale=True)
     del src
+    if frame and flight and edit["flight"]["enabled"]:
+        add_flight_overlay(rgb, flight, edit["flight"], frame[1])
     job.progress = 0.8
     return _save(rgb, dest, base, ext, opts, info)
+
+
+def add_flight_overlay(rgb, rows: list, s: dict, t: float):
+    """Draw the flight data for `t` seconds into the clip onto a rendered frame (in place)."""
+    h, w = rgb.shape[:2]
+    box = flightdata.render_box(flightdata.values(telemetry.at(rows, t), s), w, h, s)
+    x, y = flightdata.place(box, w, h, s)
+    return render.composite(rgb, box, x, y)
 
 
 def _save(rgb, dest: Path, stem: str, ext: str, opts: dict, info: dict) -> str:
@@ -272,7 +283,7 @@ def _save(rgb, dest: Path, stem: str, ext: str, opts: dict, info: dict) -> str:
 
 
 def export_video(src_path: Path, meta: dict, name: str, edit: dict, opts: dict, dest: Path,
-                 stamp_mask, job: Job, n: int = 1) -> str:
+                 stamp_mask, job: Job, n: int = 1, flight: list | None = None) -> str:
     codec = opts["video_codec"]
     ext = video.CODECS[codec][1]
     place = (geo.place_name(geo.gps_for_video(src_path, meta))
@@ -295,7 +306,8 @@ def export_video(src_path: Path, meta: dict, name: str, edit: dict, opts: dict, 
                 meta, edit, Path(work), stamp_mask,
                 long_edge=size_spec(opts["video_size"]), fps=output_fps(opts["video_fps"], meta),
                 out_pix_fmt=pix, allow_upscale=True,
-                stab=video.prepare_stabilize(src_path, meta, edit, Path(work), use_gpu, job.cancel))
+                stab=video.prepare_stabilize(src_path, meta, edit, Path(work), use_gpu, job.cancel),
+                flight=flight)
             cmd = video.export_command(src_path, meta, g, tmp, codec, opts["video_quality"],
                                        opts["keep_metadata"], use_gpu=use_gpu)
             video.run_ffmpeg(cmd, g["duration"], progress, job.cancel)
