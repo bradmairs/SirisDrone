@@ -3,6 +3,14 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.27 – 2026-11-13
+
+- **Automatic checks on GitHub:** every pull request and every push to `main` runs the full test
+  suite (with FFmpeg) and checks the web UI's JavaScript, so a broken change can't slip in
+  through the automatic merges.
+- **Release tags:** after each merge to `main`, the commit is tagged `v<version>` automatically
+  (sessions couldn't push tags, so releases since 1.0 were untagged).
+
 ## 1.26 – 2026-10-13
 
 - **Fix:** locations looked up before 1.14 were cached, so places that 1.14 now names (e.g.

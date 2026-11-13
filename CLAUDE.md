@@ -13,7 +13,9 @@
   Versions are plain decimals: 1.0 → 1.01 → 1.02, and a big step from 1.02 gives 1.12.
 - **Merge to `main` automatically**: open the pull request ready for review (not a draft), and
   once the tests pass and the PR is mergeable, merge it yourself without waiting to be asked.
-- After merging, tag the merge commit on `main` as `v<version>` and push the tag.
+- Tagging is automatic: the CI workflow (`.github/workflows/ci.yml`) tags `v<version>` on `main`
+  after each merge. Sessions can't push tags themselves, so don't try.
+- CI runs the tests on every pull request; wait for it to pass before merging.
 
 ## Checks before pushing
 
