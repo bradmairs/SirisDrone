@@ -5,9 +5,18 @@ edit (BRM Blue, stamp, level horizon, exposure; D-Cinelike look for 10-bit video
 exported with a recipe: photos → full-resolution JPEG, videos → Apple TV 4K.
 Files still being copied are left alone until their size stops changing.
 
-With `cull` on, each scan's new photos are culled (with the rest of their trip) before export:
-blurry shots and lesser near-duplicates are kept in the library, marked rejected, and neither
-exported nor deleted. An item's keep/reject override in the library wins.
+Each scan's new files are exported as a batch, after two trip-wide passes:
+
+* `cull` – photos are culled with the rest of their trip: blurry shots and lesser
+  near-duplicates are kept in the library, marked rejected, and neither exported nor deleted.
+  An item's keep/reject override in the library wins.
+* `match` – exposure and white balance are evened out across the trip (see tripmatch.py), so
+  photos posted together and clips cut together don't jump in brightness or colour.
+
+With `reel` on, a trip's highlight reel (see reel.py) is made once its clips have all arrived:
+on the first scan with nothing still copying and no new files from that trip. It goes into the
+trip's export folder and is remade, replacing the old one, when more clips arrive later. With
+`delete_originals` also on, the trip's clips are kept until the reel is done.
 
 With `delete_originals` on, a file picked up while it is on is deleted from the watch folder
 (and dropped from the library) once its export has finished and the exported file exists. For
@@ -24,7 +33,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import culling, jobs, recipes
+from . import culling, jobs, recipes, tripmatch
 from .config import resolve_in_root
 from .library import media_kind
 
@@ -44,6 +53,9 @@ DEFAULT_WATCH = {
     "delete_originals": False,  # delete each picked-up file once its export is done
     "trip_folders": True,     # export into a folder per trip (see export_subfolder)
     "cull": True,             # don't export blurry shots or near-duplicates (see culling.py)
+    "match": True,            # even out exposure / white balance across a trip (tripmatch.py)
+    "reel": False,            # make a highlight reel per trip (reel.py)
+    "reel_length": 60,        # seconds
 }
 PHOTO_ACTIONS = ("full", "skip")
 VIDEO_ACTIONS = ("appletv", "full", "skip")
@@ -52,7 +64,7 @@ VIDEO_ACTIONS = ("appletv", "full", "skip")
 def normalize_watch(w: dict | None) -> dict:
     o = {**DEFAULT_WATCH, **{k: v for k, v in (w or {}).items() if k in DEFAULT_WATCH}}
     for k in ("enabled", "recursive", "auto_level", "auto_exposure", "process_existing",
-              "delete_originals", "trip_folders", "cull"):
+              "delete_originals", "trip_folders", "cull", "match", "reel"):
         o[k] = bool(o[k])
     o["photos"] = "skip" if o["photos"] == "skip" else "full"  # Instagram options were removed in 1.1
     o["videos"] = o["videos"] if o["videos"] in VIDEO_ACTIONS else "appletv"
@@ -62,15 +74,21 @@ def normalize_watch(w: dict | None) -> dict:
         o["interval"] = int(min(max(float(o["interval"]), 10), 3600))
     except (TypeError, ValueError):
         o["interval"] = 30
+    try:
+        o["reel_length"] = int(min(max(float(o["reel_length"]), 15), 300))
+    except (TypeError, ValueError):
+        o["reel_length"] = 60
     return o
 
 
 class Watcher:
-    def __init__(self, cfg, lib, get_settings, submit_export, export_dest, get_job=lambda jid: None):
+    def __init__(self, cfg, lib, get_settings, submit_export, export_dest, get_job=lambda jid: None,
+                 submit_reel=None):
         self.cfg, self.lib = cfg, lib
         self.get_job = get_job                  # job id -> public job dict, or None if unknown
         self.get_settings = get_settings
         self.submit_export, self.export_dest = submit_export, export_dest
+        self.submit_reel = submit_reel
         self.state_file = cfg.data_dir / "watch_state.json"
         self.seen: dict = self._load()
         self.pending: dict[str, tuple] = {}     # path -> (size, mtime) at last scan
@@ -152,6 +170,7 @@ class Watcher:
             self.cleanup(w)
             waiting = 0
             deferred: list[tuple[str, Path]] = []
+            touched: set[str] = set()
             for p in self._files(w):
                 key = str(p)
                 st = p.stat()
@@ -166,9 +185,10 @@ class Watcher:
                     continue
                 self.pending.pop(key, None)
                 entry = {"size": st.st_size, "mtime": st.st_mtime, "item": None, "at": time.time()}
+                touched.add(str(p.parent))
                 try:
                     entry.update(self.process(p, w))
-                    if entry.get("action") == "culling":
+                    if entry.get("action") == "batch":
                         deferred.append((key, p))
                     else:
                         done += 1
@@ -177,15 +197,17 @@ class Watcher:
                     entry["error"] = str(exc)
                     self._error(f"{p.name}: {exc}")
                 self.seen[key] = entry
-                if entry.get("action") != "culling":
+                if entry.get("action") != "batch":
                     self.status["recent"] = ([{"name": p.name, **entry}] + self.status["recent"])[:20]
                 self._save()
-            done += self._cull_and_export(deferred, w)
+            done += self._finish_batch(deferred, w)
             self.status["waiting"] = waiting
+            if not waiting:
+                self._queue_reels(w, touched)
         return done
 
-    def _cull_and_export(self, deferred: list[tuple[str, Path]], w: dict) -> int:
-        """Cull this scan's photos as a batch, then export the keepers."""
+    def _finish_batch(self, deferred: list[tuple[str, Path]], w: dict) -> int:
+        """Cull this scan's photos and match colours across each trip, then export the keepers."""
         if not deferred:
             return 0
         items = []
@@ -194,10 +216,22 @@ class Watcher:
                 items.append(self.lib.get(self.seen[key]["item"]))
             except KeyError:
                 pass
-        try:
-            culling.cull_library(self.lib, items)
-        except Exception as exc:  # culling must never stop exports
-            self._error(f"Culling failed, exporting everything: {exc}")
+        if w["cull"]:
+            try:
+                culling.cull_library(self.lib, [i for i in items if i["kind"] == "photo"])
+            except Exception as exc:  # culling must never stop exports
+                self._error(f"Culling failed, exporting everything: {exc}")
+        if w["match"]:
+            try:
+                keep = [self.lib.get(i["id"]) for i in items]
+                keep = [i for i in keep if culling.effective(i) == "keep"]
+                ids = {i["id"] for i in keep}
+                trips = {self.lib.trip_key(i) for i in keep}
+                others = [o for o in self.lib.list() if o["id"] not in ids and culling.effective(o) == "keep"
+                          and self.lib.trip_key(o) in trips]
+                tripmatch.match_library(self.lib, keep, reference=others)
+            except Exception as exc:  # matching must never stop exports
+                self._error(f"Colour matching failed, exporting as edited: {exc}")
         done = 0
         for key, path in deferred:
             entry = self.seen[key]
@@ -244,23 +278,64 @@ class Watcher:
         full = {**edit, "crop": {"x": 0, "y": 0, "w": 1, "h": 1}}
         src = self.lib.preview_source(item, full, 1200, t)
         edit = recipes.auto_edit(item, edit, src, w["auto_level"], w["auto_exposure"], path=path)
+        out = {"item": item["id"]}
+        if kind == "video" and w["reel"] and self.submit_reel is not None:
+            out.update({"wait_reel": self.lib.trip_key(item), "reel_folder": self.out_folder(path, w, item)})
         if action == "skip":
             self.lib.set_edit(item["id"], edit)
-            return {"item": item["id"], "action": "edited only"}
+            return {**out, "action": "edited only"}
         edit = self.lib.set_edit(item["id"], recipes.recipe_edit(action, item, edit))
-        if kind == "photo" and w["cull"]:
-            out = {"item": item["id"], "action": "culling"}
+        if (kind == "photo" and w["cull"]) or w["match"]:
+            out["action"] = "batch"   # exported by _finish_batch at the end of the scan
             if w["delete_originals"]:
                 out["delete_after"] = True
             return out
-        return self.export_item(item, edit, path, w)
+        return {**out, **self.export_item(item, edit, path, w)}
+
+    def out_folder(self, path: Path, w: dict, item: dict) -> str:
+        folder = w["out_folder"]
+        if w["trip_folders"]:
+            folder = "/".join(p for p in (folder, self.export_subfolder(path, w, item)) if p)
+        return folder
+
+    def _queue_reels(self, w: dict, touched: set[str]) -> None:
+        """Make the highlight reel of each trip whose clips have all arrived (see module doc)."""
+        due: dict[str, list[dict]] = {}
+        for key, entry in self.seen.items():
+            if entry.get("wait_reel"):
+                due.setdefault(entry["wait_reel"], []).append(entry)
+        for trip, entries in due.items():
+            if any(Path(t).is_relative_to(trip) for t in touched):
+                continue  # new files from this trip in this scan: wait for a quiet scan
+            try:
+                if not w["reel"] or self.submit_reel is None:
+                    continue  # turned off since: just let the originals go
+                clips = [i for i in self.lib.list() if i["kind"] == "video" and self.lib.trip_key(i) == trip
+                         and culling.effective(i) == "keep"]
+                if not clips:
+                    continue
+                recipe = w["videos"] if w["videos"] != "skip" else "appletv"
+                base = self.get_settings()["export"]
+                opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
+                                              "folder": entries[0].get("reel_folder", w["out_folder"]),
+                                              **recipes.RECIPES[recipe]["options"]})
+                job = self.submit_reel(clips, opts, self.export_dest(opts), w["reel_length"], overwrite=True)
+                for e in entries:
+                    e["jobs"] = [j for j in (e.get("jobs") or [e.get("job")]) if j] + [job["id"]]
+                self.status["recent"] = ([{"name": f"{Path(trip).name} highlights", "action": "highlight reel",
+                                           "at": time.time()}] + self.status["recent"])[:20]
+            except Exception as exc:
+                self._error(f"Highlight reel for {Path(trip).name}: {exc}")
+            finally:
+                for e in entries:
+                    e.pop("wait_reel", None)
+        if due:
+            self._save()
 
     def export_item(self, item: dict, edit: dict, path: Path, w: dict) -> dict:
         recipe = w["photos"] if item["kind"] == "photo" else w["videos"]
         base = self.get_settings()["export"]
-        folder = w["out_folder"]
-        if w["trip_folders"]:
-            folder = "/".join(p for p in (folder, self.export_subfolder(path, w, item)) if p)
+        folder = self.out_folder(path, w, item)
         opts = jobs.normalize_export({**base, "root": w["out_root"] or base["root"],
                                       "folder": folder, **recipes.RECIPES[recipe]["options"]})
         dest = self.export_dest(opts)
@@ -300,6 +375,8 @@ class Watcher:
         for key, entry in self.seen.items():
             if not entry.get("delete_after") or "deleted" in entry or "kept" in entry:
                 continue
+            if entry.get("wait_reel"):
+                continue  # its trip's highlight reel isn't made yet
             path = Path(key)
             if not path.resolve().is_relative_to(base):
                 continue  # watch folder changed since: leave it alone

@@ -13,7 +13,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import analysis, culling, geo, gpu, grading, jobs, recipes, render, video
+from . import analysis, culling, geo, gpu, grading, jobs, recipes, reel, render, tripmatch, video
 from . import __version__
 from .playback import Playback
 from .config import DEFAULT_STAMP, STATIC_DIR, Config, resolve_in_root
@@ -449,6 +449,46 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                                                               bool(body.get("deflicker", True))))
         return {"jobs": [job.public()], "destination": str(dest)}
 
+    # -- trip highlight reel and colour match ------------------------------------------
+    def submit_reel(items: list[dict], opts: dict, dest: Path, length: float = 60, seg: float = 4.0,
+                    title: str = "", stem: str | None = None, overwrite: bool = False) -> dict:
+        clips = [{"path": lib.source_path(i), "meta": i, "name": i["name"], "edit": lib.get_edit(i["id"])}
+                 for i in items]
+        mask = stamp_mask()
+        return queue.submit(items[0]["id"], f"Highlight reel of {len(items)} clips", "reel",
+                            lambda job: reel.make_reel(clips, opts, dest, mask, job, length, seg, title,
+                                                       stem, overwrite)).public()
+
+    app.state.submit_reel = submit_reel
+
+    @app.post("/api/reel")
+    def highlight_reel(body: dict = Body(...)):
+        """Cut the best seconds of the selected clips into one video with a title card."""
+        items = [item_or_404(m) for m in body.get("media_ids", [])]
+        items = [i for i in items if i["kind"] == "video"]
+        if not items:
+            raise HTTPException(400, "Select the video clips of a trip")
+        recipe = recipes.RECIPES[body.get("recipe") or "appletv"]["options"]
+        base = load_settings()["export"]
+        opts = jobs.normalize_export({**base, **{k: v for k, v in recipe.items() if k.startswith("video")},
+                                      "root": body.get("root") or base["root"],
+                                      "folder": body.get("folder", base["folder"])})
+        dest = export_dest(opts)
+        length = float(min(max(float(body.get("length") or 60), 10), 600))
+        seg = float(min(max(float(body.get("segment") or 4), 2), 15))
+        job = submit_reel(items, opts, dest, length, seg, str(body.get("title") or "").strip()[:60])
+        return {"jobs": [job], "destination": str(dest)}
+
+    @app.post("/api/match")
+    def match_colours(body: dict = Body(...)):
+        """Even out exposure and white balance across each trip's selected shots."""
+        items = [item_or_404(m) for m in body.get("media_ids", [])]
+        if len(items) < 2:
+            raise HTTPException(400, "Select at least two shots of a trip")
+        changed = tripmatch.match_library(lib, items)
+        return {"checked": len(items), "changed": changed,
+                "edits": {mid: lib.get_edit(mid) for mid in changed}}
+
     # -- culling --------------------------------------------------------------------
     @app.post("/api/cull")
     def cull(body: dict = Body(default={})):
@@ -503,7 +543,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def get_job(jid: str | None) -> dict | None:
         return queue.get(jid)
 
-    watcher = Watcher(cfg, lib, load_settings, submit_export, export_dest, get_job)
+    watcher = Watcher(cfg, lib, load_settings, submit_export, export_dest, get_job, submit_reel)
     app.state.watcher = watcher
     watcher.start()
 

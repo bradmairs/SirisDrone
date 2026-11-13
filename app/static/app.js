@@ -1431,7 +1431,7 @@ function renderJobs() {
   for (const j of [...state.jobs].reverse()) {
     const pct = Math.round(j.progress * 100);
     const st = { queued: "Waiting", running: `${pct}%`, done: "Done", error: "Failed", cancelled: "Cancelled" }[j.status];
-    const li = el(`<li><div class="top"><span class="name">${({ frame: "🖼 frame · ", hdr: "◐ ", hyperlapse: "⏩ " })[j.kind] || ""}${escapeHtml(j.name)}</span>
+    const li = el(`<li><div class="top"><span class="name">${({ frame: "🖼 frame · ", hdr: "◐ ", hyperlapse: "⏩ ", reel: "🎬 " })[j.kind] || ""}${escapeHtml(j.name)}</span>
         <span class="st ${j.status}">${st}${(j.status === "queued" || j.status === "running") ? ` <button class="link" data-cancel="${j.id}">cancel</button>` : ""}</span></div>
         ${j.status === "running" ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
         ${j.output ? `<div class="out">${escapeHtml(j.output)}</div>` : ""}
@@ -1555,6 +1555,9 @@ async function openAutomation() {
   $("#wDelete").checked = w.delete_originals;
   $("#wTrips").checked = w.trip_folders;
   $("#wCull").checked = w.cull;
+  $("#wMatch").checked = w.match;
+  $("#wReel").checked = w.reel;
+  $("#wReelLen").value = String(w.reel_length);
   renderWatchLog(status);
   $("#autoDlg").showModal();
 }
@@ -1581,7 +1584,8 @@ function initAutomation() {
         photos: $("#wPhotos").value, videos: $("#wVideos").value, auto_level: $("#wLevel").checked,
         auto_exposure: $("#wExposure").checked, recursive: $("#wRecursive").checked,
         process_existing: $("#wExisting").checked, delete_originals: $("#wDelete").checked,
-        trip_folders: $("#wTrips").checked, cull: $("#wCull").checked,
+        trip_folders: $("#wTrips").checked, cull: $("#wCull").checked, match: $("#wMatch").checked,
+        reel: $("#wReel").checked, reel_length: +$("#wReelLen").value,
       });
       state.cfg.settings.watch = r.settings;
       renderWatchLog(r.status);
@@ -1624,6 +1628,43 @@ function initBatchTools() {
     const lead = state.current && state.selected.has(state.current.id) ? state.current : photos[0];
     $("#hlInfo").textContent = `${photos.length} photos, in file-name order. Every frame gets the edit of “${lead.name}” (grade, crop, sky); the stamp is added once.`;
     $("#hlDlg").showModal();
+  };
+  const selectedVideos = () => state.items.filter((i) => state.selected.has(i.id) && i.kind === "video");
+  $("#matchBtn").onclick = async () => {
+    const ids = [...state.selected];
+    if (ids.length < 2) return toast("Select the shots of a trip (at least two)", "error");
+    await saveEdit.flush();
+    $("#matchBtn").disabled = true;
+    try {
+      const r = await api("POST", "/api/match", { media_ids: ids });
+      const n = Object.keys(r.changed).length;
+      toast(n ? `Matched colours: adjusted ${n} of ${r.checked} shot(s)` : "These shots already match");
+      await loadLibrary();
+      if (state.current && r.changed[state.current.id]) {
+        const cur = state.current.id;
+        state.current = null;  // force selectItem to reload the matched edit
+        await selectItem(cur);
+      }
+    } catch (e) { toast(e.message, "error"); } finally { $("#matchBtn").disabled = false; }
+  };
+  $("#reelBtn").onclick = () => {
+    const vids = selectedVideos();
+    if (!vids.length) return toast("Select the video clips of a trip", "error");
+    const secs = vids.reduce((a, v) => a + (v.duration || 0), 0);
+    $("#reelInfo").textContent = `${vids.length} clip(s), ${fmtTime(secs).replace(/\.\d$/, "")} in all. The steadiest, sharpest seconds of each are cut together in shooting order with crossfades, after a title card, using each clip's own edit. The stamp is added once.`;
+    $("#reelDlg").showModal();
+  };
+  $("#reelStart").onclick = async () => {
+    await saveEdit.flush();
+    try {
+      const r = await api("POST", "/api/reel", {
+        media_ids: selectedVideos().map((v) => v.id), title: $("#reelTitle").value.trim(),
+        length: +$("#reelLen").value, segment: +$("#reelSeg").value, recipe: $("#reelRecipe").value,
+      });
+      $("#reelDlg").close();
+      toast(`Making highlight reel → ${r.destination}`);
+      $("#jobsDrawer").hidden = false; pollJobs(true);
+    } catch (e) { toast(e.message, "error"); }
   };
   $("#hlStart").onclick = async () => {
     const photos = selectedPhotos();

@@ -50,6 +50,8 @@
       <button class="link" id="syncBtn">Apply settings…</button>
       <button class="link" id="hdrBtn" title="Merge an exposure bracket (AEB) into one HDR photo">Merge HDR</button>
       <button class="link" id="hlBtn" title="Make a video from a photo sequence">Hyperlapse…</button>
+      <button class="link" id="matchBtn" title="Even out exposure and white balance across each trip's selected shots">Match colours</button>
+      <button class="link" id="reelBtn" title="Cut the best seconds of the selected clips into one video">Highlight reel…</button>
       <button class="link danger" id="removeBtn">Remove</button>
     </div>
   </aside>
@@ -229,6 +231,11 @@
       <label class="chk"><input type="checkbox" id="wExisting"> Also process files already in the folder</label>
       <label class="chk" title="Blurry shots and lesser near-duplicates stay in the library as Rejected instead of being exported"><input type="checkbox" id="wCull"> Skip blurry &amp; duplicate photos</label>
       <label class="chk" title="A trip folder copied into the watch folder gets its own folder of edits; loose files are grouped by the day they were taken"><input type="checkbox" id="wTrips"> A folder per trip</label>
+      <label class="chk" title="Even out exposure and white balance across each trip, so shots and clips don't jump in brightness or colour"><input type="checkbox" id="wMatch"> Match colour across each trip</label>
+    </div>
+    <div class="field row wrap">
+      <label class="chk" title="Once a trip's clips have all arrived, the best seconds of each are cut into one video in the trip's export folder"><input type="checkbox" id="wReel"> Make a highlight reel for each trip</label>
+      <select id="wReelLen" title="Reel length" style="width:auto"><option value="30">30 s</option><option value="60">1 min</option><option value="90">1½ min</option><option value="120">2 min</option></select>
     </div>
     <label class="chk" title="For when the watch folder holds copies of originals kept elsewhere"><input type="checkbox" id="wDelete"> Delete each file from the watch folder once it's exported</label>
     <p class="hint">Only files picked up while this is ticked, and only after their export has finished. Failed exports and “Edit only” files are kept. The watch folder must be writable.</p>
@@ -238,6 +245,25 @@
       <button type="button" class="btn ghost" id="wScan">Check now</button>
       <button value="cancel" class="btn ghost">Close</button>
       <button type="button" class="btn primary" id="wSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Highlight reel -->
+<dialog id="reelDlg" class="dlg small">
+  <form method="dialog">
+    <h2>Highlight reel</h2>
+    <p class="hint" id="reelInfo"></p>
+    <div class="field"><label>Title</label><input id="reelTitle" maxlength="60" placeholder="e.g. Wharariki Beach (default: the clips' place)"></div>
+    <div class="field"><label>Length</label>
+      <select id="reelLen"><option value="30">30 seconds</option><option value="60" selected>1 minute</option><option value="90">1½ minutes</option><option value="120">2 minutes</option></select></div>
+    <div class="field"><label>Each shot</label>
+      <select id="reelSeg"><option value="3">3 seconds</option><option value="4" selected>4 seconds</option><option value="5">5 seconds</option><option value="6">6 seconds</option></select></div>
+    <div class="field"><label>Output</label>
+      <select id="reelRecipe"><option value="appletv">Apple TV 4K (3840 × 2160 HEVC)</option><option value="full">Full resolution HEVC</option></select></div>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn ghost">Cancel</button>
+      <button type="button" class="btn primary" id="reelStart">Make reel</button>
     </div>
   </form>
 </dialog>
