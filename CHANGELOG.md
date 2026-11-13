@@ -3,6 +3,28 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.47 – 2026-11-13
+
+- **Highlight reel:** select a trip's clips and choose *Highlight reel…* to get one video of
+  their best moments. Every clip is sampled twice a second and scored for sharpness, jerky
+  motion and over-fast pans (the first and last second are skipped). The best window of each
+  clip comes first, then the next best anywhere, up to 30 s – 2 min. The windows are rendered
+  with each clip's own edit (grade, crop, stabilise, denoise) and joined in shooting order with
+  crossfades. A title card leads (place and date over a blurred first frame, with the BRM
+  Highlife logo), the stamp is added once, and the reel fades to black at the end. Output is
+  Apple TV 4K or full resolution, on the GPU when available.
+- **Match colours:** select a trip's shots and choose *Match colours* to even out exposure and
+  white balance. Each shot is nudged most of the way to the trip's median, through its own
+  Exposure, Temperature and Tint sliders, so it stays editable. Photos and videos are matched
+  separately, and the changes are capped (±0.6 EV, ±25 temperature, ±12 tint) so a sunset stays
+  a sunset.
+- **Automation:**
+  - *Match colour across each trip* is on by default. Each scan's new files are matched against
+    the rest of their trip before export.
+  - New *Make a highlight reel for each trip* option (30 s – 2 min). The reel is made once a
+    trip's clips have all arrived, into the trip's export folder, and remade when more clips
+    arrive. With *Delete originals* on, clips are kept until their reel is done.
+
 ## 1.37 – 2026-11-13
 
 - **Smart culling:** photos are checked for blur (how wide the sharpest edges are, so a calm
