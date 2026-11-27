@@ -3,6 +3,17 @@
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 
+## 1.77 – 2026-11-28
+
+- **Flight log:** *Flights* in the top bar lists every flight, worked out from the footage. A
+  flight is a run of clips with their DJI `.SRT` (and the photos taken among them) with no gap
+  over 6 minutes, so a battery swap starts a new one. Each flight shows when and where, how long,
+  highest, furthest from take-off, fastest and distance flown, plus what was shot. You can keep
+  a note on each (the battery, the wind) and open its first clip. Totals: flights, hours,
+  kilometres, the highest and furthest ever, places, and this year.
+- `GET /api/flights`, `GET /api/flights/summary` (totals and the last flight, for SirisOS's
+  widget), `PUT /api/flights/{id}/note`. `/?view=flights` opens the log.
+
 ## 1.67 – 2026-11-13
 
 - **Flight data overlay:** Video → *Flight data overlay* draws altitude, speed and distance from

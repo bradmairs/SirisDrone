@@ -1645,7 +1645,7 @@ async function init() {
   buildPanel();
   renderPresetGrid();
   initLibrary(); initDrop(); initBrowser(); initExport(); initJobs(); initViewer(); initCropDrag(); initTimeline();
-  initAutomation(); initBatchTools(); initMap(); initStatus(); showGpu();
+  initAutomation(); initBatchTools(); initMap(); initFlights(); initStatus(); showGpu();
   const unavailable = state.cfg.output_roots.filter((r) => !r.available);
   if (unavailable.length) toast(`Export folder “${unavailable[0].name}” is not reachable – is the NAS mounted?`, "error");
   await loadLibrary();
@@ -1992,3 +1992,52 @@ function initBatchTools() {
 init().catch((e) => toast("Failed to start: " + e.message, "error"));
 // Installable as an app ("Add to Home Screen"), and on Android a share target for photos/videos.
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+
+// -- flight log (1.77) -------------------------------------------------------------------
+const fmtKm = (m) => m == null ? "–" : m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+const fmtWhen = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+
+async function openFlights() {
+  $("#flightsDlg").showModal();
+  $("#flightsInfo").textContent = "Loading…";
+  let data;
+  try { data = await api("GET", "/api/flights"); } catch (e) { $("#flightsInfo").textContent = e.message; return; }
+  const t = data.totals;
+  $("#flightsInfo").textContent = t.flights ? `${t.flights} flight(s) from clips with a DJI .SRT` : "";
+  $("#flightTotals").innerHTML = t.flights ? [
+    ["Flights", t.flights], ["Hours", t.hours], ["Flown", `${t.km} km`], ["Highest", t.highest_m != null ? `${t.highest_m} m` : "–"],
+    ["Furthest", fmtKm(t.furthest_m)], ["Places", t.places], [`In ${t.year}`, `${t.flights_this_year} · ${t.hours_this_year} h`],
+  ].map(([k, v]) => `<div><span class="hint">${k}</span><b>${escapeHtml(String(v))}</b></div>`).join("") : "";
+  $("#flightList").innerHTML = data.flights.length ? data.flights.map((f) => `
+    <li data-fid="${f.id}">
+      <img src="/api/media/${f.items.find(Boolean)}/thumb" alt="" loading="lazy">
+      <div class="flight-main">
+        <b>${escapeHtml(f.place || "Unknown place")}</b> <span class="hint">${fmtWhen(f.start)} · ${f.minutes} min</span>
+        <div class="hint">Highest ${f.max_alt_m != null ? f.max_alt_m + " m" : "–"} · furthest ${fmtKm(f.furthest_m)} · fastest ${f.max_speed_kmh != null ? f.max_speed_kmh + " km/h" : "–"} · flown ${f.flown_km} km · ${f.clips} clip(s)${f.photos ? `, ${f.photos} photo(s)` : ""}</div>
+        <input class="flight-note" placeholder="Note: battery, wind, who was there" value="${escapeHtml(f.note || "")}" aria-label="Note for this flight">
+      </div>
+      <button type="button" class="btn ghost" data-open="${f.items[0]}">Open</button>
+    </li>`).join("") : `<li class="hint">No flights yet. Flights come from clips with their DJI .SRT beside them (or uploaded with them).</li>`;
+}
+
+function initFlights() {
+  $("#flightsBtn").onclick = openFlights;
+  $("#flightList").addEventListener("change", async (e) => {
+    const input = e.target.closest(".flight-note");
+    if (!input) return;
+    const fid = input.closest("li[data-fid]").dataset.fid;
+    try { await api("PUT", `/api/flights/${fid}/note`, { note: input.value }); toast("Note saved"); } catch (err) { toast(err.message); }
+  });
+  $("#flightList").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-open]");
+    if (!b) return;
+    e.preventDefault();
+    $("#flightsDlg").close();
+    state.filter = "all";
+    document.querySelectorAll("[data-f]").forEach((x) => x.classList.toggle("on", x.dataset.f === "all"));
+    renderLibrary();
+    await selectItem(b.dataset.open);
+  });
+  if (new URLSearchParams(location.search).get("view") === "flights") openFlights();
+}

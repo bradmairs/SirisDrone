@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import analysis, culling, geo, gpu, grading, jobs, notify, recipes, reel, render, telemetry, tripmatch, video
+from . import analysis, culling, flightlog, geo, gpu, grading, jobs, notify, recipes, reel, render, telemetry, tripmatch, video
 from . import __version__
 from .playback import Playback
 from .config import DEFAULT_STAMP, STATIC_DIR, Config, resolve_in_root
@@ -748,6 +748,30 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                           "lon": it["gps"][1], "trip": lib.trip_key(it),
                           "rejected": culling.effective(it) == "reject"})
         return {"shots": shots, "tracks": tracks}
+
+    # -- flight log (1.77) ----------------------------------------------------------------
+    flight_notes = flightlog.Notes(cfg.data_dir / "flight-notes.json")
+
+    @app.get("/api/flights")
+    def flight_log():
+        """Every flight worked out from the footage (newest first), with totals."""
+        log = flightlog.cached(lib, flight_notes)
+        return {"flights": log, "totals": flightlog.totals(log)}
+
+    @app.get("/api/flights/summary")
+    def flight_summary():
+        """The totals and the last flight, for SirisOS's widget."""
+        t = flightlog.totals(flightlog.cached(lib, flight_notes))
+        if t["last"]:
+            t["last"] = {k: v for k, v in t["last"].items() if k != "items"}
+        return {"version": __version__, **t}
+
+    @app.put("/api/flights/{fid}/note")
+    def flight_note(fid: str, body: dict):
+        if not (len(fid) == 15 and fid[8] == "-" and fid.replace("-", "").isdigit()):
+            raise HTTPException(404, "No such flight")
+        flight_notes.set(fid, str(body.get("note") or ""))
+        return {"ok": True}
 
     @app.exception_handler(KeyError)
     async def key_error(request: Request, exc: KeyError):
