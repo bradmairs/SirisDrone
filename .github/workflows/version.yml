@@ -1,0 +1,28 @@
+name: Version
+
+# Section.Feature.Fix, the same as SirisOS and SirisAI (docs/releases.md). A pull request that changes VERSION has to be
+# newer than main's, with its release notes; scripts/bump-version.sh rebase renumbers it when main has moved on.
+on:
+  pull_request:
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Newer than main, Section.Feature.Fix, with release notes
+        run: |
+          mine="$(tr -d '[:space:]' < VERSION)"
+          echo "$mine" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::VERSION should be Section.Feature.Fix, like 2.6.1, not $mine"; exit 1; }
+          if git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- VERSION; then
+            echo "No version change: fine for a change that isn't released on its own."; exit 0
+          fi
+          [ -f "docs/releases/$mine.md" ] || { echo "::error::Missing docs/releases/$mine.md (scripts/bump-version.sh starts it)"; exit 1; }
+          main="$(git show "origin/${{ github.base_ref }}:VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+          echo "$main" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "main has no Section.Feature.Fix version yet ($main): fine"; exit 0; }
+          newest="$(printf '%s\n%s\n' "$main" "$mine" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+          if [ "$mine" = "$main" ] || [ "$newest" != "$mine" ]; then
+            echo "::error::This branch is $mine but main is already $main. Run scripts/bump-version.sh rebase, then push."; exit 1
+          fi
