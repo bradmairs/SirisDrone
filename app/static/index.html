@@ -27,6 +27,7 @@
     <button class="btn" id="importBtn" title="Add files already on the NAS (no upload needed)">Import from NAS</button>
     <button class="btn" id="autoBtn" title="Watch a NAS folder and edit/export new drone files automatically">Automation <span class="dot" id="autoDot" hidden></span></button>
     <button class="btn" id="mapBtn" title="Where your shots were taken, trip by trip">Map</button>
+    <button class="btn" id="flightsBtn" title="Every flight from your footage: when, where, how high and far">Flights</button>
     <button class="btn" id="statusBtn" title="NAS space, watch folder, GPU and recent problems">Status <span class="dot" id="statusDot" hidden></span></button>
     <span class="gpu-badge" id="gpuBadge" hidden></span>
     <button class="btn ghost" id="jobsBtn">Exports <span class="pill" id="jobsCount" hidden>0</span></button>
@@ -282,6 +283,15 @@
   <form method="dialog">
     <div class="map-head"><h2>Trip map</h2><span class="hint" id="mapInfo"></span><button value="cancel" class="btn ghost">Close</button></div>
     <div class="map-wrap"><div id="map"></div><ul class="map-trips" id="mapTrips"></ul></div>
+  </form>
+</dialog>
+
+<!-- Flight log -->
+<dialog id="flightsDlg" class="dlg wide">
+  <form method="dialog">
+    <div class="map-head"><h2>Flight log</h2><span class="hint" id="flightsInfo"></span><button value="cancel" class="btn ghost">Close</button></div>
+    <div class="flight-totals" id="flightTotals"></div>
+    <ul class="flight-list" id="flightList"></ul>
   </form>
 </dialog>
 
