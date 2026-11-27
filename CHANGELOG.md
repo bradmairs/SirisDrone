@@ -1,5 +1,7 @@
 # Changelog
 
+**From 1.7.8, versions are Section.Feature.Fix (like SirisOS) and release notes are in [docs/releases/](docs/releases/).** In the new numbering 1.77 is 1.7.7.
+
 Versions go up by **0.01** for small fixes and tweaks and by **0.1** for significant
 features (see `CLAUDE.md`). Each release is tagged `v<version>` on `main`.
 

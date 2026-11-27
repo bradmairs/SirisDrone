@@ -1,21 +1,10 @@
 # SirisDrone Studio – working rules
 
-## Releases and versioning (owner's standing instructions)
+## Versions and shipping (Brad's standing instructions)
 
-- The app is versioned from **1.0** (`__version__` in `app/__init__.py`, shown in the UI top bar
-  and `/api/config`).
-- Every change that is pushed gets a version bump in the same branch:
-  - **+0.01** (`python tools/bump_version.py small "<summary>"`) for small fixes, tweaks,
-    wording, small additions to an existing feature.
-  - **+0.1** (`python tools/bump_version.py big "<summary>"`) for significant new features or
-    behaviour changes.
-  The tool writes the new version and adds a `CHANGELOG.md` entry; fill in the bullet points.
-  Versions are plain decimals: 1.0 → 1.01 → 1.02, and a big step from 1.02 gives 1.12.
-- **Merge to `main` automatically**: open the pull request ready for review (not a draft), and
-  once the tests pass and the PR is mergeable, merge it yourself without waiting to be asked.
-- Tagging is automatic: the CI workflow (`.github/workflows/ci.yml`) tags `v<version>` on `main`
-  after each merge. Sessions can't push tags themselves, so don't try.
-- CI runs the tests on every pull request; wait for it to pass before merging.
+- **Bump the version in every pull request.** Versions are **Section.Feature.Fix** (e.g. 2.6.1), the same rule as SirisOS and SirisAI: `scripts/bump-version.sh fix` (+0.0.1) for a fix or minor change; `scripts/bump-version.sh feature` (+0.1.0) for a new feature or a bigger upgrade; `scripts/bump-version.sh section` (+1.0.0) only for a significant new section. Fill in the `docs/releases/<version>.md` it starts. If CI's version check says main has moved on, run `scripts/bump-version.sh rebase`. See [docs/releases.md](docs/releases.md).
+- Merging a `VERSION` change tags `v<version>` and publishes the GitHub release by itself.
+- **Merge and deploy automatically**: open the pull request, wait for CI to go green, merge it (squash) and deploy, without being asked. Never merge red.
 
 ## Checks before pushing
 
